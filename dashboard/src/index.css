@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Layout rhythm — keep panel radius + section gaps identical app-wide */
+  --mw-radius-panel: 0.75rem; /* 12px ≈ Tailwind rounded-xl */
+  --mw-radius-inner: 0.5rem; /* 8px ≈ rounded-lg */
+  --mw-stack-gap: 1.25rem; /* 20px — use for space-between major sections */
+
+  /* ── Backgrounds ── */
+  --bg:       #070b14;
+  --surface:  #0b1221;
+  --card:     #0e1625;
+  --elevated: #132030;
+
+  /* ── Borders ── */
+  --border:     #1c2e44;
+  --border-dim: #12202e;
+
+  /* ── Text ── */
+  --text:  #dde4f0;
+  --muted: #8090a8;
+  --dim:   #3d5068;
+
+  /* ── Accents ── */
+  --cyan:    #22d3ee;
+  --blue:    #60a5fa;
+  --purple:  #a78bfa;
+  --brand:   #f97316;   /* orange — logo/brand ONLY */
+  --danger:  #f43f5e;
+  --warning: #fbbf24;
+  --success: #34d399;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "DM Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  letter-spacing: 0.01em;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.18);
+  color: #fff;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1c2e44;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #253d5c;
+}
+
+/* ── Range input ── */
+input[type="range"] {
+  accent-color: var(--cyan);
+}
+
+/* ── Focus rings ── */
+:focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.5);
+  outline-offset: 2px;
+}
