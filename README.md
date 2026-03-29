@@ -166,5 +166,3 @@ Dataset loader      UNWIND ETL          Temporal (CoV)
 ## Contributing
 
 PRs welcome. Open issues for bugs or feature requests.
-
-This project supports research talk proposals for DEF CON, Black Hat, KDD, PyCon, React India, Rootconf, and DataHack Summit.
