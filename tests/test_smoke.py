@@ -1,5 +1,7 @@
-"""Sanity check so pytest succeeds before the package or feature tests exist."""
+"""Sanity check once the installed package is available."""
 
 
-def test_toolchain_invokable():
-    assert True
+def test_moltwatch_package_importable():
+    import moltwatch
+
+    assert moltwatch.__version__
