@@ -17,12 +17,14 @@ data/*.csv
 # Node
 dashboard/node_modules/
 dashboard/dist/
+dashboard/.vite/
 
 # Neo4j volumes
 neo4j_data/
 neo4j_logs/
 
 # IDE
+.cursor/
 .idea/
 .vscode/
 *.swp
