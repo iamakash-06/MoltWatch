@@ -1,4 +1,4 @@
-"""Tests for collector layer: SQLite storage."""
+"""Tests for collector layer: SQLite storage and dataset loader."""
 import tempfile
 import pytest
 from pathlib import Path
@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from moltwatch.collector.models import Agent, Post, Comment, Interaction
 from moltwatch.collector.db import SQLiteStore
+from moltwatch.collector.dataset_loader import DatasetLoader
 
 
 @pytest.fixture
@@ -15,6 +16,11 @@ def store():
     s = SQLiteStore(db_path)
     yield s
     db_path.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def loader(store):
+    return DatasetLoader(store)
 
 
 def make_agent(id: str, name: str | None = None) -> Agent:
@@ -95,3 +101,18 @@ def test_get_stats(store):
     assert stats["posts"] == 1
     assert stats["comments"] == 0
 
+
+def test_synthetic_generation(loader, store):
+    result = loader.generate_synthetic(num_agents=50, num_coordinated_clusters=2, cluster_size=5)
+    assert result["agents"] >= 50
+    assert result["posts"] >= 50
+    assert result["coordinated_clusters"] == 2
+    assert len(result["cluster_agent_ids"]) == 2
+
+
+def test_synthetic_posts_have_timestamps(loader, store):
+    loader.generate_synthetic(num_agents=20)
+    posts = list(store.iter_posts())
+    assert len(posts) > 0
+    all_timestamps = [p["created_at"] for batch in store.iter_posts() for p in batch]
+    assert all(ts is not None for ts in all_timestamps)
