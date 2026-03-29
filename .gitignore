@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+build/
+dist/
+wheels/
+*.egg-info
+.venv/
+.env
+
+# Data (gitignored — use seed scripts)
+data/moltwatch.db
+data/moltgraph/
+data/*.jsonl
+data/*.csv
+
+# Node
+dashboard/node_modules/
+dashboard/dist/
+
+# Neo4j volumes
+neo4j_data/
+neo4j_logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
