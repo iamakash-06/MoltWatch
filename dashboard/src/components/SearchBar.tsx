@@ -4,13 +4,15 @@ import { api } from '../lib/api';
 import type { AgentNode } from '../types';
 
 const T = {
-  card:     '#0e1625',
-  elevated: '#132030',
-  border:   '#1c2e44',
-  text:     '#dde4f0',
-  muted:    '#8090a8',
-  dim:      '#3d5068',
-  cyan:     '#22d3ee',
+  card:     '#1a1a1f',
+  elevated: '#222228',
+  border:   'rgba(255,255,255,0.07)',
+  borderMd: 'rgba(255,255,255,0.13)',
+  text:     '#f2f2f5',
+  muted:    '#9b9baa',
+  dim:      '#6b6b7a',
+  xdim:     '#46464f',
+  orange:   '#f97316',
 };
 
 interface SearchBarProps {
@@ -46,13 +48,13 @@ export function SearchBar({ onSelectAgent, inputRef, clearSignal = 0 }: SearchBa
         className="flex items-center gap-2 rounded-xl px-3 py-2"
         style={{
           background:  T.card,
-          border:      `1px solid ${focused ? 'rgba(34,211,238,0.45)' : T.border}`,
-          boxShadow:   focused ? '0 0 0 3px rgba(34,211,238,0.08)' : 'none',
+          border:      `1px solid ${focused ? 'rgba(249,115,22,0.45)' : T.border}`,
+          boxShadow:   focused ? '0 0 0 3px rgba(249,115,22,0.08)' : 'none',
           transition:  'border-color 0.15s, box-shadow 0.15s',
           minWidth:    264,
         }}
       >
-        <Search size={14} style={{ color: focused ? T.cyan : T.dim, flexShrink: 0 }} />
+        <Search size={14} style={{ color: focused ? T.orange : T.dim, flexShrink: 0 }} />
         <input
           ref={resolvedRef}
           type="text"
@@ -62,7 +64,7 @@ export function SearchBar({ onSelectAgent, inputRef, clearSignal = 0 }: SearchBa
           onBlur={() => { setFocused(false); setTimeout(() => setOpen(false), 150); }}
           placeholder="Search agent id or name…"
           className="flex-1 text-sm bg-transparent focus:outline-none min-w-0"
-          style={{ color: T.text, caretColor: T.cyan }}
+          style={{ color: T.text, caretColor: T.orange }}
         />
         {query && (
           <button
@@ -100,8 +102,8 @@ export function SearchBar({ onSelectAgent, inputRef, clearSignal = 0 }: SearchBa
               onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = T.elevated)}
               onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
             >
-              <div className="text-sm font-mono text-white">{agent.name}</div>
-              <div className="text-xs mt-0.5" style={{ color: T.dim }}>
+              <div className="text-sm font-mono" style={{ color: T.text }}>{agent.name}</div>
+              <div className="text-xs mt-0.5" style={{ color: T.xdim }}>
                 karma {agent.karma ?? 0} · community {agent.community_id ?? '?'}
               </div>
             </button>

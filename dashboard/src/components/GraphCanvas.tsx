@@ -23,6 +23,18 @@ interface TooltipData {
   agent: AgentNode;
 }
 
+const T = {
+  bg:       '#0a0a0c',
+  card:     'rgba(10,10,12,0.94)',
+  border:   'rgba(255,255,255,0.09)',
+  text:     '#f2f2f5',
+  muted:    '#9b9baa',
+  dim:      '#6b6b7a',
+  xdim:     '#46464f',
+  orange:   '#f97316',
+  cyan:     '#22d3ee',
+};
+
 function getNodeColor(node: AgentNode, mode: ColorMode, maxPr: number): string {
   if (mode === 'trust')    return trustColor(node.trust_score);
   if (mode === 'pagerank') return pageRankHeatColor(node.pagerank, maxPr);
@@ -37,19 +49,21 @@ export function GraphCanvas({
   onNodeClick,
   emptyMessage,
 }: GraphCanvasProps) {
-  const containerRef    = useRef<HTMLDivElement>(null);
-  const sigmaRef        = useRef<Sigma | null>(null);
-  const graphRef        = useRef<Graph | null>(null);
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const haloCanvasRef  = useRef<HTMLCanvasElement>(null);
+  const sigmaRef       = useRef<Sigma | null>(null);
+  const graphRef       = useRef<Graph | null>(null);
 
   const [colorMode, setColorMode] = useState<ColorMode>(externalColorMode ?? 'community');
 
-  // Refs for reducers (prevent stale closures)
+  // Refs to prevent stale closures
   const hoveredNodeRef   = useRef<string | null>(null);
   const selectedNodeRef  = useRef<string | null>(null);
   const neighborsRef     = useRef<Set<string>>(new Set());
   const colorModeRef     = useRef<ColorMode>(colorMode);
   const highlightSetRef  = useRef<Set<string>>(new Set(highlightAgents));
   const maxPrRef         = useRef<number>(1);
+  const topNodeIdsRef    = useRef<Set<string>>(new Set());
 
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
@@ -60,10 +74,70 @@ export function GraphCanvas({
   // Sync refs
   useEffect(() => { colorModeRef.current = colorMode; }, [colorMode]);
   useEffect(() => { highlightSetRef.current = new Set(highlightAgents); }, [highlightAgents]);
-  useEffect(() => {
-    if (externalColorMode) setColorMode(externalColorMode);
-  }, [externalColorMode]);
+  useEffect(() => { if (externalColorMode) setColorMode(externalColorMode); }, [externalColorMode]);
 
+  // ── Community halo renderer ───────────────────────────────────────────────
+  const drawHalos = useCallback(() => {
+    const canvas = haloCanvasRef.current;
+    const sigma  = sigmaRef.current;
+    const g      = graphRef.current;
+    if (!canvas || !sigma || !g) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (colorModeRef.current !== 'community') return;
+
+    // Group node viewport positions by community
+    const communityPoints = new Map<number, { x: number; y: number }[]>();
+    g.forEachNode((node, attrs) => {
+      const agentData = attrs.agentData as AgentNode | undefined;
+      const cid = agentData?.community_id;
+      if (cid === undefined) return;
+      const vp = sigma.graphToViewport({ x: attrs.x as number, y: attrs.y as number });
+      if (!communityPoints.has(cid)) communityPoints.set(cid, []);
+      communityPoints.get(cid)!.push(vp);
+    });
+
+    communityPoints.forEach((pts, cid) => {
+      if (pts.length < 4) return;
+      const color = communityColor(cid);
+
+      // Centroid
+      const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+      const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+
+      // Max radius from centroid + padding
+      let maxR = 0;
+      pts.forEach((p) => {
+        const d = Math.hypot(p.x - cx, p.y - cy);
+        if (d > maxR) maxR = d;
+      });
+      maxR = Math.max(maxR + 44, 60);
+
+      // Radial gradient fill
+      const grad = ctx.createRadialGradient(cx, cy, maxR * 0.15, cx, cy, maxR);
+      grad.addColorStop(0,   color + '20');
+      grad.addColorStop(0.5, color + '12');
+      grad.addColorStop(1,   color + '00');
+      ctx.beginPath();
+      ctx.arc(cx, cy, maxR, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Dashed boundary ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, maxR - 8, 0, Math.PI * 2);
+      ctx.strokeStyle = color + '28';
+      ctx.lineWidth   = 1;
+      ctx.setLineDash([6, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  }, []);
+
+  // ── Graph builder ─────────────────────────────────────────────────────────
   const buildGraph = useCallback(() => {
     if (!containerRef.current || nodes.length === 0) return;
     if (sigmaRef.current) { sigmaRef.current.kill(); sigmaRef.current = null; }
@@ -71,20 +145,44 @@ export function GraphCanvas({
     const maxPr = Math.max(...nodes.map((n) => n.pagerank ?? 0), 1);
     maxPrRef.current = maxPr;
 
+    // Top 15 nodes by pagerank get persistent labels
+    topNodeIdsRef.current = new Set(
+      [...nodes]
+        .sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0))
+        .slice(0, 15)
+        .map((n) => n.id),
+    );
+
+    // Pre-assign community cluster angles for organized initial layout
+    const communityIds = Array.from(
+      new Set(nodes.map((n) => n.community_id).filter((c) => c !== undefined)),
+    ) as number[];
+    const communityAngle = new Map<number, number>();
+    communityIds.forEach((cid, i) => {
+      communityAngle.set(cid, (i / Math.max(communityIds.length, 1)) * Math.PI * 2);
+    });
+
     const g = new Graph({ multi: false, type: 'directed' });
     graphRef.current = g;
 
     nodes.forEach((node) => {
       const color = getNodeColor(node, colorModeRef.current, maxPr);
       const size  = pageRankSize(node.pagerank);
+
+      // Initialize nodes in their community cluster — gives FA2 a huge head start
+      const angle    = communityAngle.get(node.community_id ?? -1) ?? Math.random() * Math.PI * 2;
+      const clusterR = 380;
+      const scatter  = 50 + Math.random() * 50;
+      const nodeAngle = Math.random() * Math.PI * 2;
+
       g.addNode(node.id, {
         label:     node.name,
         size,
         baseSize:  size,
         color,
         baseColor: color,
-        x: Math.random() * 1000 - 500,
-        y: Math.random() * 1000 - 500,
+        x: Math.cos(angle) * clusterR + Math.cos(nodeAngle) * scatter,
+        y: Math.sin(angle) * clusterR + Math.sin(nodeAngle) * scatter,
         agentData: node,
       });
     });
@@ -95,66 +193,78 @@ export function GraphCanvas({
       if (!edgeSet.has(key) && g.hasNode(edge.source) && g.hasNode(edge.target)) {
         edgeSet.add(key);
         g.addEdge(edge.source, edge.target, {
-          size:  Math.min(Math.max(edge.weight * 0.3, 0.5), 2.5),
-          color: '#162840',   // blue-dark edge base
+          size:  Math.min(Math.max(edge.weight * 0.25, 0.4), 1.5),
+          color: 'rgba(255,255,255,0.04)',
         });
       }
     });
 
-    // ForceAtlas2
+    // ForceAtlas2 — more iterations + adjustSizes for proper cluster separation
     if (g.order > 0) {
       forceAtlas2.assign(g, {
-        iterations: 150,
+        iterations: 300,
         settings: {
-          gravity:          2,
-          scalingRatio:     12,
+          gravity:           0.8,
+          scalingRatio:      18,
           strongGravityMode: false,
-          slowDown:         10,
-          barnesHutOptimize: g.order > 300,
-          barnesHutTheta:   0.5,
-          adjustSizes:      false,
+          slowDown:          8,
+          barnesHutOptimize: g.order > 200,
+          barnesHutTheta:    0.5,
+          adjustSizes:       true,   // ← nodes repel based on size, prevents overlap
+          linLogMode:        false,
         },
       });
     }
 
+    // Size halo canvas to match container
+    if (haloCanvasRef.current && containerRef.current) {
+      const dpr = window.devicePixelRatio || 1;
+      haloCanvasRef.current.width  = containerRef.current.offsetWidth  * dpr;
+      haloCanvasRef.current.height = containerRef.current.offsetHeight * dpr;
+      haloCanvasRef.current.style.width  = `${containerRef.current.offsetWidth}px`;
+      haloCanvasRef.current.style.height = `${containerRef.current.offsetHeight}px`;
+      const ctx = haloCanvasRef.current.getContext('2d');
+      if (ctx) ctx.scale(dpr, dpr);
+    }
+
     const sigma = new Sigma(g, containerRef.current, {
       renderEdgeLabels: false,
-      defaultEdgeColor: '#162840',
-      defaultNodeColor: '#22d3ee',
-      labelFont:        'DM Sans, system-ui, sans-serif',
-      labelSize:        12,
-      labelWeight:      '500',
-      labelColor:       { color: '#aec4d8' },
-      minCameraRatio:   0.05,
-      maxCameraRatio:   10,
+      defaultEdgeColor: 'rgba(255,255,255,0.04)',
+      defaultNodeColor: T.orange,
+      labelFont:        'system-ui, -apple-system, sans-serif',
+      labelSize:        11,
+      labelWeight:      '600',
+      labelColor:       { color: T.muted },
+      minCameraRatio:   0.04,
+      maxCameraRatio:   12,
 
       nodeReducer: (node, data) => {
         const hovered    = hoveredNodeRef.current;
         const selected   = selectedNodeRef.current;
         const neighbors  = neighborsRef.current;
         const highlights = highlightSetRef.current;
-
         const nodeData   = g.getNodeAttributes(node).agentData as AgentNode;
         const freshColor = getNodeColor(nodeData, colorModeRef.current, maxPrRef.current);
         const freshSize  = (data.baseSize as number | undefined) ?? (data.size as number);
+        const showLabel  = topNodeIdsRef.current.has(node);
 
         if (highlights.has(node)) {
-          return { ...data, color: '#22d3ee', size: freshSize * 2.2, highlighted: true, zIndex: 10 };
+          return { ...data, color: T.orange, size: freshSize * 2.5, highlighted: true, zIndex: 10, label: data.label as string };
         }
 
         const focus = hovered || selected;
         if (!focus) {
-          return { ...data, color: freshColor, size: freshSize };
+          return { ...data, color: freshColor, size: freshSize, label: showLabel ? data.label as string : '' };
         }
 
         if (node === focus) {
-          return { ...data, color: freshColor, size: freshSize * 2.2, highlighted: true, zIndex: 10 };
+          return { ...data, color: freshColor, size: freshSize * 2.2, highlighted: true, zIndex: 10, label: data.label as string };
         }
         if (neighbors.has(node)) {
-          return { ...data, color: freshColor, size: freshSize * 1.4, zIndex: 5 };
+          return { ...data, color: freshColor, size: freshSize * 1.4, zIndex: 5, label: data.label as string };
         }
-        // Dim non-neighbors — deep navy so they nearly disappear
-        return { ...data, color: '#0e1827', size: freshSize * 0.5, label: '' };
+        // Dim non-neighbors — nearly invisible on dark background
+        return { ...data, color: '#1e1e24', size: freshSize * 0.4, label: '' };
       },
 
       edgeReducer: (edge, data) => {
@@ -163,11 +273,15 @@ export function GraphCanvas({
         const src = g.source(edge);
         const tgt = g.target(edge);
         if (src === focus || tgt === focus) {
-          return { ...data, color: '#22d3ee', size: 2.5, zIndex: 5 };
+          return { ...data, color: 'rgba(249,115,22,0.55)', size: 2, zIndex: 5 };
         }
-        return { ...data, color: '#080f19', size: 0.3 };
+        return { ...data, color: 'rgba(255,255,255,0.015)', size: 0.3 };
       },
     });
+
+    // Update halos on camera movement
+    sigma.getCamera().on('updated', drawHalos);
+    sigma.on('afterRender', drawHalos);
 
     // Hover
     sigma.on('enterNode', ({ node, event }) => {
@@ -177,7 +291,7 @@ export function GraphCanvas({
       neighborsRef.current = ns;
       const agentData = g.getNodeAttributes(node).agentData as AgentNode;
       const pointer   = event as unknown as { x: number; y: number };
-      setTooltip({ x: pointer.x + 14, y: pointer.y - 8, agent: agentData });
+      setTooltip({ x: pointer.x + 16, y: pointer.y - 10, agent: agentData });
       sigma.refresh();
     });
 
@@ -203,20 +317,42 @@ export function GraphCanvas({
 
     containerRef.current.addEventListener('mousemove', (e: MouseEvent) => {
       if (hoveredNodeRef.current !== null) {
-        setTooltip((prev) => prev ? { ...prev, x: e.clientX + 14, y: e.clientY - 8 } : prev);
+        setTooltip((prev) => prev ? { ...prev, x: e.clientX + 16, y: e.clientY - 10 } : prev);
       }
     });
 
     sigmaRef.current = sigma;
-  }, [nodes, edges, onNodeClick]);
+
+    // Draw initial halos after a short delay (sigma needs to render first)
+    setTimeout(drawHalos, 80);
+  }, [nodes, edges, onNodeClick, drawHalos]);
 
   useEffect(() => {
     buildGraph();
     return () => { if (sigmaRef.current) { sigmaRef.current.kill(); sigmaRef.current = null; } };
   }, [buildGraph]);
 
-  useEffect(() => { if (sigmaRef.current) sigmaRef.current.refresh(); }, [colorMode]);
+  useEffect(() => { if (sigmaRef.current) { sigmaRef.current.refresh(); drawHalos(); } }, [colorMode, drawHalos]);
   useEffect(() => { if (sigmaRef.current) sigmaRef.current.refresh(); }, [highlightAgents]);
+
+  // Resize halo canvas on container resize
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const hc = haloCanvasRef.current;
+      if (!hc) return;
+      const dpr = window.devicePixelRatio || 1;
+      hc.width  = el.offsetWidth  * dpr;
+      hc.height = el.offsetHeight * dpr;
+      hc.style.width  = `${el.offsetWidth}px`;
+      hc.style.height = `${el.offsetHeight}px`;
+      const ctx = hc.getContext('2d');
+      if (ctx) { ctx.scale(dpr, dpr); drawHalos(); }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [drawHalos]);
 
   const zoomIn    = () => sigmaRef.current?.getCamera().animate({ ratio: (sigmaRef.current.getCamera().ratio ?? 1) / 1.5 }, { duration: 200 });
   const zoomOut   = () => sigmaRef.current?.getCamera().animate({ ratio: (sigmaRef.current.getCamera().ratio ?? 1) * 1.5 }, { duration: 200 });
@@ -225,76 +361,69 @@ export function GraphCanvas({
 
   if (nodes.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
-        <div
-          className="w-16 h-16 rounded-xl flex items-center justify-center"
-          style={{ background: 'rgba(34,211,238,0.08)', border: '1px solid rgba(34,211,238,0.2)' }}
-        >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="1.5" opacity="0.6">
-            <circle cx="12" cy="12" r="10" /><path d="M8 12h8M12 8v8" />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16, padding: '0 24px', textAlign: 'center', background: T.bg }}>
+        <div style={{ width: 56, height: 56, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.2)' }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={T.orange} strokeWidth="1.5" opacity="0.7">
+            <circle cx="12" cy="5" r="2" /><circle cx="5" cy="19" r="2" /><circle cx="19" cy="19" r="2" />
+            <path d="M12 7v4M12 11L5 17M12 11l7 6" />
           </svg>
         </div>
-        <p className="text-sm" style={{ color: '#8090a8' }}>
-          {emptyMessage ?? (
-            <>
-              No graph data.{' '}
-              <code
-                className="font-mono text-xs px-1.5 py-0.5 rounded"
-                style={{ background: '#0e1625', border: '1px solid #1c2e44', color: '#22d3ee' }}
-              >
-                scripts/seed_neo4j.py
-              </code>
-            </>
-          )}
+        <p style={{ fontSize: 13, color: T.muted }}>
+          {emptyMessage ?? 'No graph data. Start the API server to load agent data.'}
         </p>
       </div>
     );
   }
 
-  /* ──────────────────────────────────────────────── */
-
   return (
-    <div
-      className="relative h-full w-full overflow-hidden"
-      style={{ background: '#070b14' }}
-    >
-      {/* Dot grid background */}
+    <div className="relative h-full w-full overflow-hidden" style={{ background: T.bg }}>
+
+      {/* Subtle dot grid */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          backgroundImage: 'radial-gradient(circle, rgba(34,90,140,0.35) 1px, transparent 1px)',
+          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px)',
           backgroundSize: '28px 28px',
         }}
       />
-      {/* Radial vignette */}
+      {/* Soft radial vignette */}
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse at 50% 40%, rgba(13,30,60,0.55) 0%, transparent 70%)',
-        }}
+        style={{ background: 'radial-gradient(ellipse at 50% 50%, transparent 40%, rgba(10,10,12,0.45) 100%)' }}
       />
 
-      {/* Sigma canvas */}
-      <div ref={containerRef} className="h-full w-full" />
+      {/* Community halo canvas — renders behind Sigma nodes */}
+      <canvas
+        ref={haloCanvasRef}
+        className="absolute inset-0 pointer-events-none"
+        style={{ zIndex: 1 }}
+      />
+
+      {/* Sigma WebGL canvas */}
+      <div ref={containerRef} className="h-full w-full absolute inset-0" style={{ zIndex: 2 }} />
 
       {/* ── Top-left controls ── */}
-      <div className="absolute top-4 left-4 flex flex-col gap-2.5">
+      <div className="absolute top-4 left-4 flex flex-col gap-2" style={{ zIndex: 10 }}>
 
         {/* Color mode segmented control */}
         <div
-          className="flex items-center p-1 gap-1 rounded-xl backdrop-blur-sm"
-          style={{ background: 'rgba(11,18,33,0.92)', border: '1px solid #1c2e44' }}
+          style={{
+            display: 'flex', alignItems: 'center', padding: 4, gap: 2, borderRadius: 12,
+            background: T.card, border: `1px solid ${T.border}`,
+            backdropFilter: 'blur(12px)',
+          }}
         >
           {(['community', 'trust', 'pagerank'] as ColorMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setColorMode(m)}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={
-                colorMode === m
-                  ? { background: 'rgba(34,211,238,0.15)', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.3)' }
-                  : { background: 'transparent', color: '#8090a8', border: '1px solid transparent' }
-              }
+              style={{
+                padding: '5px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                transition: 'all 0.15s',
+                background:   colorMode === m ? 'rgba(249,115,22,0.15)' : 'transparent',
+                color:        colorMode === m ? T.orange : T.muted,
+                border:       colorMode === m ? '1px solid rgba(249,115,22,0.3)' : '1px solid transparent',
+              }}
             >
               {m === 'community' ? 'Communities' : m === 'trust' ? 'Trust' : 'Influence'}
             </button>
@@ -303,25 +432,30 @@ export function GraphCanvas({
 
         {/* Zoom controls */}
         <div
-          className="flex rounded-xl overflow-hidden backdrop-blur-sm"
-          style={{ background: 'rgba(11,18,33,0.92)', border: '1px solid #1c2e44' }}
+          style={{
+            display: 'flex', borderRadius: 10, overflow: 'hidden',
+            background: T.card, border: `1px solid ${T.border}`,
+            backdropFilter: 'blur(12px)',
+          }}
         >
           {[
             { icon: ZoomIn,    action: zoomIn,    title: 'Zoom in'   },
             { icon: ZoomOut,   action: zoomOut,   title: 'Zoom out'  },
             { icon: Maximize2, action: fitGraph,  title: 'Fit graph' },
             { icon: RotateCcw, action: resetView, title: 'Reset'     },
-          ].map(({ icon: Icon, action, title }) => (
+          ].map(({ icon: Icon, action, title }, i, arr) => (
             <button
               key={title}
               onClick={action}
               title={title}
-              className="p-2.5 transition-colors"
-              style={{ color: '#8090a8', borderRight: '1px solid #1c2e44' }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = '#dde4f0')}
-              onMouseLeave={(e) => (e.currentTarget.style.color = '#8090a8')}
+              style={{
+                padding: '8px 10px', color: T.muted, transition: 'color 0.12s',
+                borderRight: i < arr.length - 1 ? `1px solid ${T.border}` : 'none',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = T.text; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = T.muted; }}
             >
-              <Icon size={14} />
+              <Icon size={13} />
             </button>
           ))}
         </div>
@@ -329,40 +463,31 @@ export function GraphCanvas({
 
       {/* ── Legend (bottom-left) ── */}
       <div
-        className="absolute bottom-4 left-4 rounded-xl p-4 backdrop-blur-sm"
         style={{
-          background: 'rgba(11,18,33,0.92)',
-          border: '1px solid #1c2e44',
+          position: 'absolute', bottom: 16, left: 16, borderRadius: 12, padding: '14px 16px',
+          background: T.card, border: `1px solid ${T.border}`,
+          backdropFilter: 'blur(12px)', zIndex: 10,
           maxWidth: 'min(calc(100% - 2rem), 22rem)',
-          maxHeight: '40vh',
-          overflowY: 'auto',
+          maxHeight: '38vh', overflowY: 'auto',
         }}
       >
         {colorMode === 'community' && communities.length > 0 && (
           <>
-            <div
-              className="text-xs font-bold uppercase tracking-wider mb-3 flex items-center gap-1.5"
-              style={{ color: '#22d3ee' }}
-            >
-              <Layers size={11} /> Communities
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: T.orange, marginBottom: 10 }}>
+              <Layers size={10} /> Communities
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-2">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
               {communities.slice(0, 8).map((cid) => {
                 const count = nodes.filter((n) => n.community_id === cid).length;
                 return (
-                  <div key={cid} className="flex items-center gap-1.5 text-xs">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ background: COMMUNITY_PALETTE[cid % COMMUNITY_PALETTE.length] }}
-                    />
-                    <span style={{ color: '#8090a8' }}>#{cid} <span style={{ color: '#dde4f0' }}>({count})</span></span>
+                  <div key={cid} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: '50%', background: COMMUNITY_PALETTE[cid % COMMUNITY_PALETTE.length], flexShrink: 0, display: 'inline-block' }} />
+                    <span style={{ color: T.muted }}>#{cid} <span style={{ color: T.text }}>({count})</span></span>
                   </div>
                 );
               })}
               {communities.length > 8 && (
-                <span className="text-xs" style={{ color: '#3d5068' }}>
-                  +{communities.length - 8} more
-                </span>
+                <span style={{ fontSize: 11, color: T.xdim }}>+{communities.length - 8} more</span>
               )}
             </div>
           </>
@@ -370,18 +495,18 @@ export function GraphCanvas({
 
         {colorMode === 'trust' && (
           <>
-            <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#22d3ee' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: T.orange, marginBottom: 10 }}>
               Trust Level
             </div>
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {[
-                { color: '#34d399', label: 'High trust (≥ 70)' },
-                { color: '#fbbf24', label: 'Medium (40–69)' },
-                { color: '#f43f5e', label: 'Low trust (< 40)' },
+                { color: '#22c55e', label: 'High trust (≥ 70)' },
+                { color: '#f59e0b', label: 'Medium (40–69)' },
+                { color: '#ef4444', label: 'Low trust (< 40)' },
               ].map((item) => (
-                <div key={item.label} className="flex items-center gap-2.5 text-xs">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: item.color }} />
-                  <span style={{ color: '#8090a8' }}>{item.label}</span>
+                <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: item.color, flexShrink: 0, display: 'inline-block' }} />
+                  <span style={{ color: T.muted }}>{item.label}</span>
                 </div>
               ))}
             </div>
@@ -390,42 +515,30 @@ export function GraphCanvas({
 
         {colorMode === 'pagerank' && (
           <>
-            <div className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: '#22d3ee' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: T.orange, marginBottom: 10 }}>
               Influence (PageRank)
             </div>
-            <div
-              className="h-2 w-36 rounded-full mb-1.5"
-              style={{ background: 'linear-gradient(to right, #3b82f6, #22d3ee, #f43f5e)' }}
-            />
-            <div className="flex justify-between text-xs" style={{ color: '#3d5068' }}>
+            <div style={{ height: 6, width: 140, borderRadius: 99, background: 'linear-gradient(to right, #3b82f6, #22d3ee, #ef4444)', marginBottom: 6 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: T.xdim, width: 140 }}>
               <span>Low</span><span>High</span>
             </div>
           </>
         )}
 
         {/* Node size key */}
-        <div
-          className="flex items-center gap-4 mt-3 pt-3"
-          style={{ borderTop: '1px solid #1c2e44' }}
-        >
-          {[{ sz: 5, label: 'Low' }, { sz: 9, label: 'Mid' }, { sz: 14, label: 'High' }].map(({ sz, label }) => (
-            <div key={label} className="flex items-center gap-1.5 text-xs">
-              <span
-                className="rounded-full inline-block shrink-0"
-                style={{ width: sz, height: sz, background: '#3d5068' }}
-              />
-              <span style={{ color: '#3d5068' }}>{label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
+          {[{ sz: 5, label: 'Low' }, { sz: 8, label: 'Mid' }, { sz: 13, label: 'High' }].map(({ sz, label }) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10 }}>
+              <span style={{ width: sz, height: sz, borderRadius: '50%', background: T.xdim, display: 'inline-block', flexShrink: 0 }} />
+              <span style={{ color: T.xdim }}>{label}</span>
             </div>
           ))}
-          <span className="text-xs ml-1" style={{ color: '#3d5068' }}>= Influence</span>
+          <span style={{ fontSize: 10, color: T.xdim }}>= Influence</span>
         </div>
 
         {highlightAgents.length > 0 && (
-          <div
-            className="flex items-center gap-2 mt-3 pt-3 text-xs"
-            style={{ borderTop: '1px solid #1c2e44', color: '#22d3ee' }}
-          >
-            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, paddingTop: 8, fontSize: 11, borderTop: `1px solid ${T.border}`, color: T.orange }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: T.orange, display: 'inline-block', flexShrink: 0 }} />
             {highlightAgents.length} agent{highlightAgents.length > 1 ? 's' : ''} highlighted
           </div>
         )}
@@ -433,57 +546,49 @@ export function GraphCanvas({
 
       {/* ── Stats badge (bottom-right) ── */}
       <div
-        className="absolute bottom-4 right-4 px-3.5 py-2 rounded-xl text-xs font-mono backdrop-blur-sm"
         style={{
-          background: 'rgba(11,18,33,0.9)',
-          border: '1px solid #1c2e44',
-          color: '#3d5068',
+          position: 'absolute', bottom: 16, right: 16, zIndex: 10,
+          padding: '6px 12px', borderRadius: 10, fontSize: 11, fontFamily: 'monospace',
+          background: T.card, border: `1px solid ${T.border}`,
+          backdropFilter: 'blur(12px)', color: T.xdim,
         }}
       >
-        <span style={{ color: '#22d3ee' }}>{nodes.length.toLocaleString()}</span> nodes
+        <span style={{ color: T.orange }}>{nodes.length.toLocaleString()}</span> nodes
         {' · '}
-        <span style={{ color: '#8090a8' }}>{edges.length.toLocaleString()}</span> edges
+        <span style={{ color: T.muted }}>{edges.length.toLocaleString()}</span> edges
       </div>
 
       {/* ── Hover tooltip ── */}
       {tooltip && (
         <div
-          className="fixed pointer-events-none z-50 rounded-xl shadow-2xl p-4 max-w-[min(90vw,20rem)]"
           style={{
-            left: tooltip.x,
-            top:  tooltip.y,
-            minWidth: 200,
-            maxWidth: 'min(90vw, 280px)',
-            background: 'rgba(11,18,33,0.97)',
-            border: '1px solid #1c2e44',
-            backdropFilter: 'blur(12px)',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(34,211,238,0.08)',
+            position: 'fixed', pointerEvents: 'none', zIndex: 50,
+            left: tooltip.x, top: tooltip.y,
+            minWidth: 200, maxWidth: 'min(90vw, 260px)',
+            borderRadius: 12, padding: '14px 16px',
+            background: 'rgba(10,10,12,0.97)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            backdropFilter: 'blur(20px)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(249,115,22,0.05)',
           }}
         >
-          <div className="font-mono text-sm font-bold mb-3" style={{ color: '#22d3ee' }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, marginBottom: 10, color: T.orange }}>
             {tooltip.agent.name}
           </div>
-          <div className="space-y-2">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {tooltip.agent.trust_score !== undefined && (
-              <div className="flex items-center gap-3">
-                <span className="text-xs w-16 shrink-0" style={{ color: '#8090a8' }}>Trust</span>
-                <div
-                  className="flex-1 rounded-full h-1.5 overflow-hidden"
-                  style={{ background: '#1c2e44', maxWidth: 80 }}
-                >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 11, width: 60, flexShrink: 0, color: T.muted }}>Trust</span>
+                <div style={{ flex: 1, height: 4, borderRadius: 99, background: 'rgba(255,255,255,0.08)', maxWidth: 80, overflow: 'hidden' }}>
                   <div
-                    className="h-full rounded-full"
                     style={{
+                      height: '100%', borderRadius: 99,
                       width: `${tooltip.agent.trust_score}%`,
-                      background: tooltip.agent.trust_score >= 70
-                        ? '#34d399'
-                        : tooltip.agent.trust_score >= 40
-                          ? '#fbbf24'
-                          : '#f43f5e',
+                      background: tooltip.agent.trust_score >= 70 ? '#22c55e' : tooltip.agent.trust_score >= 40 ? '#f59e0b' : '#ef4444',
                     }}
                   />
                 </div>
-                <span className="text-xs font-mono font-bold" style={{ color: '#dde4f0' }}>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: T.text }}>
                   {Math.round(tooltip.agent.trust_score)}
                 </span>
               </div>
@@ -495,13 +600,13 @@ export function GraphCanvas({
             ]
               .filter((r) => r.value !== undefined)
               .map((row) => (
-                <div key={row.label} className="flex items-center gap-3">
-                  <span className="text-xs w-16 shrink-0" style={{ color: '#8090a8' }}>{row.label}</span>
-                  <span className="text-xs font-mono" style={{ color: '#dde4f0' }}>{row.value}</span>
+                <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 11, width: 60, flexShrink: 0, color: T.muted }}>{row.label}</span>
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: T.text }}>{row.value}</span>
                 </div>
               ))}
           </div>
-          <div className="mt-3 pt-2.5 text-xs" style={{ borderTop: '1px solid #1c2e44', color: '#3d5068' }}>
+          <div style={{ marginTop: 10, paddingTop: 8, fontSize: 10, borderTop: `1px solid rgba(255,255,255,0.07)`, color: T.xdim }}>
             Click to open full profile →
           </div>
         </div>

@@ -1,84 +1,65 @@
 @import "tailwindcss";
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Layout rhythm — keep panel radius + section gaps identical app-wide */
-  --mw-radius-panel: 0.75rem; /* 12px ≈ Tailwind rounded-xl */
-  --mw-radius-inner: 0.5rem; /* 8px ≈ rounded-lg */
-  --mw-stack-gap: 1.25rem; /* 20px — use for space-between major sections */
-
-  /* ── Backgrounds ── */
-  --bg:       #070b14;
-  --surface:  #0b1221;
-  --card:     #0e1625;
-  --elevated: #132030;
+  /* ── Surfaces ── */
+  --bg:        #0a0a0c;
+  --surface:   #111115;
+  --card:      #1a1a1f;
+  --elevated:  #222228;
+  --hover:     #2a2a32;
 
   /* ── Borders ── */
-  --border:     #1c2e44;
-  --border-dim: #12202e;
+  --border:    rgba(255,255,255,0.07);
+  --border-md: rgba(255,255,255,0.13);
+  --border-lg: rgba(255,255,255,0.22);
 
   /* ── Text ── */
-  --text:  #dde4f0;
-  --muted: #8090a8;
-  --dim:   #3d5068;
+  --text:      #f2f2f5;
+  --muted:     #9b9baa;
+  --dim:       #6b6b7a;
+  --xdim:      #46464f;
 
   /* ── Accents ── */
-  --cyan:    #22d3ee;
-  --blue:    #60a5fa;
-  --purple:  #a78bfa;
-  --brand:   #f97316;   /* orange — logo/brand ONLY */
-  --danger:  #f43f5e;
-  --warning: #fbbf24;
-  --success: #34d399;
+  --orange:    #f97316;
+  --orange-dk: #ea580c;
+  --green:     #22c55e;
+  --red:       #ef4444;
+  --amber:     #f59e0b;
+  --cyan:      #22d3ee;
+  --blue:      #60a5fa;
+  --purple:    #a78bfa;
 }
 
-html,
-body,
-#root {
+html, body, #root {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font-family: "DM Sans", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
-body {
-  letter-spacing: 0.01em;
-}
+body { letter-spacing: -0.01em; }
 
-::selection {
-  background: rgba(34, 211, 238, 0.18);
-  color: #fff;
-}
+::selection { background: rgba(249,115,22,0.25); color: #fff; }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #1c2e44;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #253d5c;
-}
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.09); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
 
-/* ── Range input ── */
-input[type="range"] {
-  accent-color: var(--cyan);
-}
+input[type="range"] { accent-color: var(--orange); cursor: pointer; }
+input[type="range"]:disabled { opacity: 0.3; cursor: default; }
+input, select { color-scheme: dark; }
 
-/* ── Focus rings ── */
-:focus-visible {
-  outline: 2px solid rgba(34, 211, 238, 0.5);
-  outline-offset: 2px;
-}
+:focus-visible { outline: 2px solid rgba(249,115,22,0.55); outline-offset: 2px; border-radius: 5px; }
+
+/* ── Animations ── */
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.fade-in { animation: fadeIn 0.2s ease forwards; }
+.skeleton { background: linear-gradient(90deg, var(--elevated) 25%, var(--hover) 50%, var(--elevated) 75%); background-size: 200% 100%; animation: shimmer 1.6s infinite; border-radius: 6px; }
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }

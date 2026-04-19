@@ -6,18 +6,22 @@ import { X, Activity, Shield, Zap, Users } from 'lucide-react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 
 const T = {
-  bg:       '#070b14',
-  surface:  '#0b1221',
-  card:     '#0e1625',
-  elevated: '#132030',
-  border:   '#1c2e44',
-  text:     '#dde4f0',
-  muted:    '#8090a8',
-  dim:      '#3d5068',
+  bg:       '#0a0a0c',
+  surface:  '#111115',
+  card:     '#1a1a1f',
+  elevated: '#222228',
+  hover:    '#2a2a32',
+  border:   'rgba(255,255,255,0.07)',
+  borderMd: 'rgba(255,255,255,0.13)',
+  text:     '#f2f2f5',
+  muted:    '#9b9baa',
+  dim:      '#6b6b7a',
+  xdim:     '#46464f',
+  orange:   '#f97316',
   cyan:     '#22d3ee',
-  danger:   '#f43f5e',
-  warning:  '#fbbf24',
-  success:  '#34d399',
+  danger:   '#ef4444',
+  warning:  '#f59e0b',
+  success:  '#22c55e',
 };
 
 interface AgentDetailProps {
@@ -80,9 +84,9 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
       >
         <div
           className="w-14 h-14 rounded-xl flex items-center justify-center"
-          style={{ background: 'rgba(34,211,238,0.07)', border: '1px solid rgba(34,211,238,0.18)' }}
+          style={{ background: 'rgba(249,115,22,0.07)', border: '1px solid rgba(249,115,22,0.18)' }}
         >
-          <Users size={24} style={{ color: T.cyan, opacity: 0.6 }} />
+          <Users size={24} style={{ color: T.orange, opacity: 0.6 }} />
         </div>
         <p className="text-sm leading-relaxed" style={{ color: T.muted }}>
           Select an agent node to open their investigation profile.
@@ -97,7 +101,7 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
         className="flex items-center justify-center min-h-[14rem] gap-3"
         style={{ background: T.card, color: T.dim }}
       >
-        <Activity size={15} className="animate-pulse" style={{ color: T.cyan }} />
+        <Activity size={15} className="animate-pulse" style={{ color: T.orange }} />
         <span className="text-sm">Loading profile…</span>
       </div>
     );
@@ -150,9 +154,9 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
             {agent.name?.[0]?.toUpperCase() ?? '?'}
           </div>
           <div>
-            <h2 className="font-mono text-base font-bold text-white leading-tight">{agent.name}</h2>
+            <h2 className="font-mono text-base font-bold leading-tight" style={{ color: T.text }}>{agent.name}</h2>
             <div className="text-xs font-mono mt-1" style={{ color: T.dim }}>{agent.id}</div>
-            <div className="text-xs mt-1" style={{ color: T.cyan }}>Trust & behavioral fingerprint</div>
+            <div className="text-xs mt-1" style={{ color: T.muted }}>Trust & behavioral fingerprint</div>
           </div>
         </div>
         {onClose && (
@@ -160,7 +164,7 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
             onClick={onClose}
             className="p-1.5 rounded-lg transition-all shrink-0"
             style={{ color: T.dim }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = T.text; (e.currentTarget as HTMLElement).style.background = T.elevated; }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = T.orange; (e.currentTarget as HTMLElement).style.background = 'rgba(249,115,22,0.08)'; }}
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = T.dim; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
           >
             <X size={14} />
@@ -179,7 +183,7 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Shield size={14} style={{ color: tColor }} />
-              <span className="text-sm font-semibold text-white">Trust Score</span>
+              <span className="text-sm font-semibold" style={{ color: T.text }}>Trust Score</span>
             </div>
             <span className="text-2xl font-bold font-mono" style={{ color: tColor }}>
               {Math.round(trustScore)}
@@ -229,7 +233,7 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
             { label: 'Community', value: agent.community_id !== undefined ? `#${agent.community_id}` : '—', color: cColor },
             { label: 'In-degree', value: String(agent.in_degree ?? '—'),                               color: undefined as string | undefined },
             { label: 'Out-degree',value: String(agent.out_degree ?? '—'),                              color: undefined as string | undefined },
-            { label: 'PageRank',  value: agent.pagerank?.toFixed(4) ?? '—',                            color: T.cyan },
+            { label: 'PageRank',  value: agent.pagerank?.toFixed(4) ?? '—',                            color: T.cyan  },
             { label: 'CoV',       value: (heartbeat?.cov ?? agent.cov_score)?.toFixed(3) ?? '—',      color: undefined as string | undefined },
           ].map((m) => (
             <div
@@ -238,7 +242,7 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
               style={{ background: T.elevated, border: `1px solid ${T.border}` }}
             >
               <div className="text-xs mb-1.5" style={{ color: T.dim }}>{m.label}</div>
-              <div className="text-base font-mono font-bold" style={{ color: m.color ?? T.text }}>
+              <div className="text-sm font-mono font-bold" style={{ color: m.color ?? T.text }}>
                 {m.value}
               </div>
             </div>
@@ -253,7 +257,7 @@ export function AgentDetail({ agentId, onClose }: AgentDetailProps) {
           >
             <div className="flex items-center gap-2">
               <Zap size={13} style={{ color: isAutonomous ? T.success : T.warning }} />
-              <span className="text-sm font-semibold text-white">Heartbeat Fingerprint</span>
+              <span className="text-sm font-semibold" style={{ color: T.text }}>Heartbeat Fingerprint</span>
             </div>
             <div className="space-y-2.5">
               {heartbeat.estimated_interval_minutes && (

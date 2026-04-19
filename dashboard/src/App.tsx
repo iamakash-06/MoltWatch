@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import {
-  Pause, Play, X,
+  Pause, Play, X, RefreshCw,
   Network, ShieldAlert, BarChart3, Users, GitBranch,
-  TrendingUp, AlertTriangle, Activity, Info,
-  Sparkles, ArrowRight,
+  TrendingUp, AlertTriangle, Activity, Sparkles,
+  ServerOff, Search,
 } from 'lucide-react';
 import { Layout } from './components/Layout';
 import { GraphCanvas } from './components/GraphCanvas';
@@ -19,246 +19,273 @@ import { useCommunities, useThreats } from './hooks/useAnalysis';
 import { communityColor, SEVERITY_BG, SEVERITY_BORDER, trustColor } from './lib/colors';
 import { api } from './lib/api';
 
-// ── Design tokens (inline for Tailwind compat) ────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────────
 const T = {
-  bg:       '#070b14',
-  surface:  '#0b1221',
-  card:     '#0e1625',
-  elevated: '#132030',
-  border:   '#1c2e44',
-  borderDim:'#12202e',
-  text:     '#dde4f0',
-  muted:    '#8090a8',
-  dim:      '#3d5068',
+  bg:       '#0a0a0c',
+  surface:  '#111115',
+  card:     '#1a1a1f',
+  elevated: '#222228',
+  hover:    '#2a2a32',
+  border:   'rgba(255,255,255,0.07)',
+  borderMd: 'rgba(255,255,255,0.13)',
+  text:     '#f2f2f5',
+  muted:    '#9b9baa',
+  dim:      '#6b6b7a',
+  xdim:     '#46464f',
+  orange:   '#f97316',
+  green:    '#22c55e',
+  red:      '#ef4444',
+  amber:    '#f59e0b',
   cyan:     '#22d3ee',
   blue:     '#60a5fa',
   purple:   '#a78bfa',
-  danger:   '#f43f5e',
-  warning:  '#fbbf24',
-  success:  '#34d399',
-};
+} as const;
 
-const cardStyle = { background: T.card, border: `1px solid ${T.border}` };
-const sectionHeader = `text-xs font-bold uppercase tracking-[0.1em] flex items-center gap-2`;
+// ── Shared atoms ──────────────────────────────────────────────────────────────
+const card = (extra: React.CSSProperties = {}): React.CSSProperties => ({
+  background: T.card,
+  border: `1px solid ${T.border}`,
+  borderRadius: 12,
+  ...extra,
+});
 
-// ─── Overview Page ────────────────────────────────────────────────────────────
+function Divider() {
+  return <div style={{ height: 1, background: T.border, margin: '0 -24px' }} />;
+}
+
+function SectionLabel({ children, icon: Icon, color = T.dim }: {
+  children: React.ReactNode; icon?: React.ElementType; color?: string;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+      {Icon && <Icon size={13} style={{ color, flexShrink: 0 }} />}
+      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: T.dim }}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
+function PageHeader({
+  icon: Icon, title, subtitle, accent = T.orange, right, border = true,
+}: {
+  icon: React.ElementType; title: string; subtitle?: React.ReactNode;
+  accent?: string; right?: React.ReactNode; border?: boolean;
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 20, padding: '16px 32px', flexShrink: 0,
+      background: T.surface,
+      borderBottom: border ? `1px solid ${T.border}` : 'none',
+    }}>
+      {/* Left: icon + text */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 180, flex: 1 }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: `${accent}14`, border: `1px solid ${accent}28`,
+        }}>
+          <Icon size={16} style={{ color: accent }} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{
+            fontSize: 16, fontWeight: 700, color: T.text, letterSpacing: '-0.02em',
+            lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {title}
+          </h1>
+          {subtitle && (
+            <p style={{
+              fontSize: 12, color: T.dim, marginTop: 2, lineHeight: 1.4,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {subtitle}
+            </p>
+          )}
+        </div>
+      </div>
+      {/* Right: optional actions/search */}
+      {right && (
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {right}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({
+  icon: Icon = ServerOff, title = 'No data', message, color = T.dim,
+}: {
+  icon?: React.ElementType; title?: string; message?: string; color?: string;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', textAlign: 'center', gap: 12 }}>
+      <div style={{
+        width: 52, height: 52, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: `${color}12`, border: `1px solid ${color}22`,
+      }}>
+        <Icon size={22} style={{ color, opacity: 0.6 }} />
+      </div>
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: T.muted }}>{title}</div>
+        {message && <div style={{ fontSize: 12, color: T.xdim, marginTop: 4, maxWidth: 260, lineHeight: 1.5 }}>{message}</div>}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, accent, icon: Icon, loading = false }: {
+  label: string; value?: string; sub?: string; accent: string;
+  icon: React.ElementType; loading?: boolean;
+}) {
+  return (
+    <div style={{ ...card(), padding: '22px 24px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{
+        position: 'absolute', top: 0, right: 0, width: 140, height: 140, pointerEvents: 'none',
+        background: `radial-gradient(circle at top right, ${accent}09, transparent 55%)`,
+      }} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div style={{
+          width: 36, height: 36, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: `${accent}14`, border: `1px solid ${accent}22`, flexShrink: 0,
+        }}>
+          <Icon size={15} style={{ color: accent }} />
+        </div>
+      </div>
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div className="skeleton" style={{ height: 32, width: '60%' }} />
+          <div className="skeleton" style={{ height: 14, width: '80%' }} />
+          <div className="skeleton" style={{ height: 12, width: '50%' }} />
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: 30, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: T.text, lineHeight: 1, letterSpacing: '-0.03em' }}>
+            {value ?? '—'}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: T.muted, marginTop: 8 }}>{label}</div>
+          {sub && <div style={{ fontSize: 12, color: T.xdim, marginTop: 2 }}>{sub}</div>}
+        </>
+      )}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: 2,
+        background: `linear-gradient(to right, ${accent}cc, transparent)`,
+      }} />
+    </div>
+  );
+}
+
+// ─── Overview ────────────────────────────────────────────────────────────────
 function OverviewPage() {
   const { data: overview } = useNetworkOverview();
-  const { threats, anomalies } = useThreats(60000);
+  const { threats, anomalies } = useThreats(60_000);
   const [criticalNodes, setCriticalNodes] = useState<any[]>([]);
+  const ov = overview as any;
 
   useEffect(() => {
-    api.threats.criticalNodes(5).then((d: any) => setCriticalNodes(d.critical_nodes || []));
+    api.threats.criticalNodes(5)
+      .then((d: any) => setCriticalNodes(d.critical_nodes ?? []))
+      .catch(() => {});
   }, []);
 
   const allThreats = [...threats, ...anomalies];
 
-  const statCards = overview
-    ? [
-        {
-          label: 'Total Agents',
-          sub:   'Distinct AI identities',
-          value: (overview as any).agents?.toLocaleString() ?? '—',
-          icon:  Users,
-          accent: T.cyan,
-        },
-        {
-          label: 'Submolts',
-          sub:   'Active communities',
-          value: (overview as any).submolts?.toLocaleString() ?? '—',
-          icon:  GitBranch,
-          accent: T.purple,
-        },
-        {
-          label: 'Reply Edges',
-          sub:   'Interaction links',
-          value: (overview as any).reply_edges?.toLocaleString() ?? '—',
-          icon:  Network,
-          accent: T.blue,
-        },
-        {
-          label: 'Communities',
-          sub:   'Louvain clusters',
-          value: (overview as any).community_count?.toLocaleString() ?? '—',
-          icon:  BarChart3,
-          accent: T.success,
-        },
-      ]
-    : [];
-
   return (
-    <div
-      className="h-full min-h-0 overflow-y-auto"
-      style={{ background: T.bg }}
-    >
-      <div className="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8 py-5 sm:py-6 space-y-5">
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: T.bg }} className="fade-in">
+      <PageHeader
+        icon={Sparkles}
+        title="Network Overview"
+        subtitle="Real-time health briefing of the Moltbook agent social graph"
+        accent={T.cyan}
+      />
 
-        {/* ── Page hero ── */}
-        <div
-          className="rounded-xl p-6 sm:p-7 relative isolate min-w-0"
-          style={{ background: T.card, border: `1px solid ${T.border}` }}
-        >
-          {/* Glow accent — clipped to card so it does not affect curve */}
-          <div
-            className="absolute inset-0 rounded-[inherit] overflow-hidden pointer-events-none"
-            aria-hidden
-          >
-            <div
-              className="absolute top-0 right-0 w-64 h-64"
-              style={{
-                background: 'radial-gradient(circle at top right, rgba(34,211,238,0.07), transparent 60%)',
-              }}
-            />
-          </div>
-          <div className="relative flex items-start gap-5 min-w-0">
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.25)' }}
-            >
-              <Sparkles size={20} style={{ color: T.cyan }} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h1 className="text-2xl font-bold text-white tracking-tight">Network Overview</h1>
-              <p className="text-sm mt-2 leading-relaxed max-w-2xl break-words" style={{ color: T.muted }}>
-                Real-time health briefing of the Moltbook agent social graph — scale, concentration
-                risk, and community structure. Drill into the Graph Explorer to investigate threats.
-              </p>
-            </div>
-          </div>
-        </div>
+      <div style={{ padding: '28px 32px', maxWidth: 1440, display: 'flex', flexDirection: 'column', gap: 24 }}>
 
         {/* ── Stat cards ── */}
-        {statCards.length > 0 && (
-          <div className="grid grid-cols-2 xl:grid-cols-4 gap-5">
-            {statCards.map(({ label, sub, value, icon: Icon, accent }) => (
-              <div
-                key={label}
-                className="flex rounded-xl overflow-hidden min-w-0"
-                style={{ background: T.card, border: `1px solid ${T.border}` }}
-              >
-                <div className="w-1 shrink-0 self-stretch" style={{ background: accent }} aria-hidden />
-                <div className="p-6 flex flex-col gap-3 flex-1 min-w-0">
-                  <div className="flex items-start justify-between">
-                    <div
-                      className="w-9 h-9 rounded-lg flex items-center justify-center"
-                      style={{ background: `${accent}14`, border: `1px solid ${accent}30` }}
-                    >
-                      <Icon size={17} style={{ color: accent }} />
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-3xl font-bold font-mono text-white leading-none break-all">{value}</div>
-                    <div className="text-sm font-medium text-white mt-2">{label}</div>
-                    <div className="text-xs mt-1 leading-snug" style={{ color: T.dim }}>{sub}</div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+          <StatCard label="Total Agents"  value={ov?.agents?.toLocaleString()}         sub="Distinct AI identities"  accent={T.cyan}   icon={Users}     loading={!ov} />
+          <StatCard label="Communities"   value={ov?.community_count?.toString()}       sub="Louvain clusters"         accent={T.purple} icon={GitBranch} loading={!ov} />
+          <StatCard label="Reply Edges"   value={ov?.reply_edges?.toLocaleString()}     sub="Interaction links"        accent={T.blue}   icon={Network}   loading={!ov} />
+          <StatCard label="Submolts"      value={ov?.submolts?.toLocaleString()}        sub="Active topic communities" accent={T.green}  icon={BarChart3} loading={!ov} />
+        </div>
 
-        {/* ── Risk metrics + chart ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 min-w-0">
+        {/* ── Risk metrics + timeline chart ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16 }}>
 
-          {/* Key risk metrics */}
-          {overview && (
-            <div className="rounded-xl p-6 space-y-4 min-w-0" style={cardStyle}>
-              <div className={sectionHeader} style={{ color: T.cyan }}>
-                <TrendingUp size={13} /> Key Risk Metrics
-              </div>
-              {[
-                {
-                  label: 'Modularity (Q)',
-                  value: (overview as any).modularity?.toFixed(4),
-                  hint: 'Higher = stronger cluster separation. >0.9 = echo chamber risk.',
-                  alert: ((overview as any).modularity ?? 0) > 0.9,
-                },
-                {
-                  label: 'Karma Gini',
-                  value: (overview as any).gini_karma?.toFixed(4),
-                  hint: 'Engagement inequality. 1.0 = all engagement to one agent.',
-                  alert: ((overview as any).gini_karma ?? 0) > 0.7,
-                },
-                {
-                  label: 'PageRank Gini',
-                  value: (overview as any).gini_pagerank?.toFixed(4),
-                  hint: 'Influence concentration. Higher = more centralized power.',
-                  alert: ((overview as any).gini_pagerank ?? 0) > 0.7,
-                },
-              ].map((m) => (
-                <div
-                  key={m.label}
-                  className="rounded-xl p-4 min-w-0"
-                  style={{ background: T.elevated, border: `1px solid ${T.border}` }}
-                >
-                  <div className="flex justify-between items-baseline gap-2 min-w-0">
-                    <span className="text-sm font-medium text-white min-w-0">{m.label}</span>
-                    <span
-                      className="font-mono text-base font-bold shrink-0"
-                      style={{ color: m.alert ? T.warning : T.cyan }}
-                    >
-                      {m.value ?? '—'}
+          {/* Risk metrics */}
+          <div style={{ ...card(), padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div><SectionLabel icon={TrendingUp} color={T.orange}>Risk Metrics</SectionLabel></div>
+            {ov ? (
+              [
+                { label: 'Modularity (Q)',  val: ov.modularity?.toFixed(4),    alert: (ov.modularity ?? 0) > 0.9,    hint: 'Echo chamber risk above 0.9' },
+                { label: 'Karma Gini',      val: ov.gini_karma?.toFixed(4),    alert: (ov.gini_karma ?? 0) > 0.7,    hint: 'Engagement inequality index' },
+                { label: 'PageRank Gini',   val: ov.gini_pagerank?.toFixed(4), alert: (ov.gini_pagerank ?? 0) > 0.7, hint: 'Influence concentration index' },
+              ].map(m => (
+                <div key={m.label} style={{ background: T.elevated, borderRadius: 9, padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
+                    <span style={{ fontSize: 13, color: T.muted }}>{m.label}</span>
+                    <span style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: m.alert ? T.amber : T.cyan }}>
+                      {m.val ?? '—'}
                     </span>
                   </div>
-                  <p className="text-xs mt-2 leading-relaxed break-words" style={{ color: T.dim }}>{m.hint}</p>
+                  <p style={{ fontSize: 11, color: m.alert ? T.amber : T.xdim, lineHeight: 1.4 }}>{m.hint}</p>
+                  {m.alert && (
+                    <div style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6,
+                      fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                      color: T.amber, background: 'rgba(245,158,11,0.12)', borderRadius: 4, padding: '2px 6px',
+                      border: '1px solid rgba(245,158,11,0.25)',
+                    }}>
+                      ⚠ Warning
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            ) : (
+              <EmptyState icon={Activity} title="Awaiting connection" message="Start the API server to load metrics" color={T.dim} />
+            )}
+          </div>
 
-          {/* Metrics chart */}
-          <div
-            className="lg:col-span-2 rounded-xl overflow-hidden min-h-0 min-w-0"
-            style={{ ...cardStyle, minHeight: 380 }}
-          >
+          {/* Chart */}
+          <div style={{ ...card(), overflow: 'hidden', minHeight: 340 }}>
             <MetricsPanel />
           </div>
         </div>
 
         {/* ── Active threats + critical nodes ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 min-w-0">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
 
-          {/* Active threats bar chart */}
-          <div className="rounded-xl p-6 space-y-5 min-w-0" style={cardStyle}>
-            <div className="flex items-center justify-between">
-              <div className={sectionHeader} style={{ color: T.danger }}>
-                <ShieldAlert size={13} /> Active Threats
-              </div>
-              <span className="text-xs font-mono" style={{ color: T.dim }}>{allThreats.length} total</span>
+          {/* Active threats */}
+          <div style={{ ...card(), padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div><SectionLabel icon={ShieldAlert} color={T.red}>Active Threats</SectionLabel></div>
+              <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: T.xdim }}>
+                {allThreats.length} total
+              </span>
             </div>
-
             {allThreats.length === 0 ? (
-              <div className="py-8 text-center">
-                <div className="text-sm" style={{ color: T.dim }}>No active threats detected</div>
-              </div>
+              <EmptyState icon={ShieldAlert} title="All clear" message="No active threats in current snapshot" color={T.green} />
             ) : (
-              <div className="space-y-4">
-                {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const).map((sev) => {
-                  const count = allThreats.filter((t) => t.severity === sev).length;
-                  if (!count) return null;
-                  const pct = (count / allThreats.length) * 100;
-                  const color = SEVERITY_BORDER[sev];
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const).map(sev => {
+                  const cnt = allThreats.filter(t => t.severity === sev).length;
+                  if (!cnt) return null;
+                  const pct = (cnt / allThreats.length) * 100;
+                  const col = SEVERITY_BORDER[sev];
                   return (
-                    <div key={sev}>
-                      <div className="flex items-center gap-3 mb-2">
-                        <span
-                          className={`text-xs font-bold px-2.5 py-1 rounded-lg border w-20 text-center shrink-0 ${SEVERITY_BG[sev]}`}
-                        >
-                          {sev}
-                        </span>
-                        <div
-                          className="flex-1 h-2 rounded-full overflow-hidden"
-                          style={{ background: T.elevated }}
-                        >
-                          <div
-                            className="h-full rounded-full transition-all"
-                            style={{ width: `${pct}%`, background: color }}
-                          />
-                        </div>
-                        <span className="text-sm font-mono font-bold w-5 text-right shrink-0" style={{ color: T.text }}>
-                          {count}
-                        </span>
+                    <div key={sev} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span className={`text-xs font-bold px-2.5 py-1 rounded-md border ${SEVERITY_BG[sev]}`}
+                        style={{ width: 76, textAlign: 'center', flexShrink: 0 }}>
+                        {sev}
+                      </span>
+                      <div style={{ flex: 1, height: 6, borderRadius: 99, background: T.elevated, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct}%`, background: col, borderRadius: 99 }} />
                       </div>
+                      <span style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: T.text, width: 20, textAlign: 'right', flexShrink: 0 }}>
+                        {cnt}
+                      </span>
                     </div>
                   );
                 })}
@@ -267,48 +294,41 @@ function OverviewPage() {
           </div>
 
           {/* Critical nodes */}
-          <div className="rounded-xl p-6 space-y-5 min-w-0" style={cardStyle}>
-            <div className="flex items-center justify-between">
-              <div className={sectionHeader} style={{ color: T.warning }}>
-                <AlertTriangle size={13} /> Critical Nodes
-              </div>
-              <span className="text-xs" style={{ color: T.dim }}>Highest blast radius</span>
+          <div style={{ ...card(), padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div><SectionLabel icon={AlertTriangle} color={T.amber}>Critical Nodes</SectionLabel></div>
+              <span style={{ fontSize: 12, color: T.xdim }}>Highest blast radius</span>
             </div>
-
             {criticalNodes.length === 0 ? (
-              <div className="py-8 text-center text-sm" style={{ color: T.dim }}>
-                Run analysis to compute critical nodes
-              </div>
+              <EmptyState icon={AlertTriangle} title="No data" message="Run analysis to identify critical nodes" color={T.amber} />
             ) : (
-              <div className="space-y-2.5">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {criticalNodes.map((node: any, i: number) => {
-                  const cColor = communityColor(node.community_id);
+                  const cc = communityColor(node.community_id);
                   return (
-                    <div
-                      key={node.id}
-                      className="flex items-center gap-3 p-3.5 rounded-xl min-w-0"
-                      style={{ background: T.elevated, border: `1px solid ${T.border}` }}
-                    >
-                      <span className="text-xs font-mono w-5 shrink-0" style={{ color: T.dim }}>{i + 1}</span>
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shrink-0"
-                        style={{ background: `${cColor}18`, color: cColor, border: `1px solid ${cColor}35` }}
-                      >
+                    <div key={node.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: T.elevated, borderRadius: 9, padding: '10px 14px' }}>
+                      <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: T.xdim, width: 18, flexShrink: 0 }}>{i + 1}</span>
+                      <div style={{
+                        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 12, fontWeight: 700,
+                        background: `${cc}18`, color: cc, border: `1px solid ${cc}35`,
+                      }}>
                         {node.name?.[0]?.toUpperCase() ?? '?'}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-mono text-white truncate break-all">{node.name}</div>
-                        <div className="text-xs mt-0.5" style={{ color: T.dim }}>
-                          {node.blast_radius?.hop2
-                            ? `2-hop reach: ${node.blast_radius.hop2} agents`
-                            : `Community #${node.community_id}`}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontFamily: 'monospace', color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {node.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: T.xdim, marginTop: 2 }}>
+                          {node.blast_radius?.hop2 ? `2-hop reach: ${node.blast_radius.hop2} agents` : `Community #${node.community_id}`}
                         </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-sm font-mono font-bold" style={{ color: T.warning }}>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums', fontFamily: 'monospace', color: T.amber }}>
                           {node.pagerank?.toFixed(2)}
                         </div>
-                        <div className="text-xs" style={{ color: T.dim }}>PR</div>
+                        <div style={{ fontSize: 10, color: T.xdim }}>PR</div>
                       </div>
                     </div>
                   );
@@ -317,24 +337,6 @@ function OverviewPage() {
             )}
           </div>
         </div>
-
-        {/* ── Info footer ── */}
-        <div
-          className="rounded-xl px-5 py-4 flex items-start gap-3 text-sm min-w-0"
-          style={{ background: T.card, border: `1px solid ${T.border}`, color: T.muted }}
-        >
-          <Info size={15} style={{ color: T.cyan }} className="shrink-0 mt-0.5" />
-          <span className="leading-relaxed min-w-0 break-words">
-            Metrics reflect the current Neo4j graph snapshot. Re-run{' '}
-            <code
-              className="font-mono text-xs px-1.5 py-0.5 rounded"
-              style={{ background: T.elevated, border: `1px solid ${T.border}`, color: T.cyan }}
-            >
-              scripts/run_analysis.py
-            </code>{' '}
-            to refresh intelligence.
-          </span>
-        </div>
       </div>
     </div>
   );
@@ -342,7 +344,7 @@ function OverviewPage() {
 
 // ─── Graph Page ───────────────────────────────────────────────────────────────
 function GraphPage() {
-  const [communityFilter, setCommunityFilter] = useState<number | undefined>(undefined);
+  const [communityFilter, setCommunityFilter] = useState<number | undefined>();
   const [trustFilter, setTrustFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
   const [focusMode, setFocusMode] = useState<'all' | 'ego1' | 'ego2'>('all');
   const [workspaceTab, setWorkspaceTab] = useState<'threats' | 'paths' | 'case'>('threats');
@@ -352,310 +354,214 @@ function GraphPage() {
   const { data: communityData } = useCommunities();
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string[]>([]);
-  const [clearSearchSignal, setClearSearchSignal] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [clearSignal, setClearSignal] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  const trustFilteredNodes = useMemo(() => {
+  const trustFiltered = useMemo(() => {
     if (trustFilter === 'all') return nodes;
-    return nodes.filter((n) => {
-      const score = n.trust_score ?? 0;
-      if (trustFilter === 'high')   return score >= 70;
-      if (trustFilter === 'medium') return score >= 40 && score < 70;
-      return score < 40;
+    return nodes.filter(n => {
+      const s = n.trust_score ?? 0;
+      if (trustFilter === 'high')   return s >= 70;
+      if (trustFilter === 'medium') return s >= 40 && s < 70;
+      return s < 40;
     });
   }, [nodes, trustFilter]);
 
   const temporalRange = useMemo(() => {
-    const stamps = trustFilteredNodes
-      .map((n) => (n.created_at ? Date.parse(n.created_at) : Number.NaN))
-      .filter((ts) => Number.isFinite(ts));
-    if (stamps.length === 0) return null;
+    const stamps = trustFiltered.map(n => n.created_at ? Date.parse(n.created_at) : NaN).filter(isFinite);
+    if (!stamps.length) return null;
     return { min: Math.min(...stamps), max: Math.max(...stamps) };
-  }, [trustFilteredNodes]);
+  }, [trustFiltered]);
 
   const temporalCutoff = useMemo(() => {
     if (!temporalRange) return null;
-    return temporalRange.min + ((temporalRange.max - temporalRange.min) * playbackProgress) / 100;
+    return temporalRange.min + (temporalRange.max - temporalRange.min) * playbackProgress / 100;
   }, [temporalRange, playbackProgress]);
 
-  const temporallyFilteredNodes = useMemo(() => {
-    if (!temporalCutoff) return trustFilteredNodes;
-    return trustFilteredNodes.filter((n) => {
+  const timeNodes = useMemo(() => {
+    if (!temporalCutoff) return trustFiltered;
+    return trustFiltered.filter(n => {
       if (!n.created_at) return true;
       const ts = Date.parse(n.created_at);
-      if (!Number.isFinite(ts)) return true;
-      return ts <= temporalCutoff;
+      return !isFinite(ts) || ts <= temporalCutoff;
     });
-  }, [trustFilteredNodes, temporalCutoff]);
+  }, [trustFiltered, temporalCutoff]);
 
-  const temporalIds = useMemo(() => new Set(temporallyFilteredNodes.map((n) => n.id)), [temporallyFilteredNodes]);
-  const temporallyFilteredEdges = useMemo(
-    () => edges.filter((e) => temporalIds.has(e.source) && temporalIds.has(e.target)),
-    [edges, temporalIds],
-  );
+  const timeIds   = useMemo(() => new Set(timeNodes.map(n => n.id)), [timeNodes]);
+  const timeEdges = useMemo(() => edges.filter(e => timeIds.has(e.source) && timeIds.has(e.target)), [edges, timeIds]);
 
-  const selectedAgentName = useMemo(
-    () => temporallyFilteredNodes.find((n) => n.id === selectedAgent)?.name ?? selectedAgent,
-    [temporallyFilteredNodes, selectedAgent],
-  );
+  const selectedName = useMemo(() => timeNodes.find(n => n.id === selectedAgent)?.name ?? selectedAgent, [timeNodes, selectedAgent]);
 
   const focusIds = useMemo(() => {
     if (!selectedAgent || focusMode === 'all') return null;
-    const adjacency = new Map<string, Set<string>>();
-    for (const edge of temporallyFilteredEdges) {
-      if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set());
-      if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set());
-      adjacency.get(edge.source)?.add(edge.target);
-      adjacency.get(edge.target)?.add(edge.source);
+    const adj = new Map<string, Set<string>>();
+    for (const e of timeEdges) {
+      if (!adj.has(e.source)) adj.set(e.source, new Set());
+      if (!adj.has(e.target)) adj.set(e.target, new Set());
+      adj.get(e.source)!.add(e.target);
+      adj.get(e.target)!.add(e.source);
     }
-    const maxDepth = focusMode === 'ego1' ? 1 : 2;
-    const visited  = new Set<string>([selectedAgent]);
-    const queue: Array<{ id: string; depth: number }> = [{ id: selectedAgent, depth: 0 }];
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current) break;
-      if (current.depth >= maxDepth) continue;
-      for (const next of adjacency.get(current.id) ?? []) {
-        if (visited.has(next)) continue;
-        visited.add(next);
-        queue.push({ id: next, depth: current.depth + 1 });
+    const maxD   = focusMode === 'ego1' ? 1 : 2;
+    const visited = new Set([selectedAgent]);
+    const queue   = [{ id: selectedAgent, depth: 0 }];
+    while (queue.length) {
+      const cur = queue.shift()!;
+      if (cur.depth >= maxD) continue;
+      for (const next of adj.get(cur.id) ?? []) {
+        if (!visited.has(next)) { visited.add(next); queue.push({ id: next, depth: cur.depth + 1 }); }
       }
     }
     return visited;
-  }, [selectedAgent, focusMode, temporallyFilteredEdges]);
+  }, [selectedAgent, focusMode, timeEdges]);
 
-  const finalNodes = useMemo(() => {
-    if (!focusIds) return temporallyFilteredNodes;
-    return temporallyFilteredNodes.filter((n) => focusIds.has(n.id));
-  }, [temporallyFilteredNodes, focusIds]);
-
-  const finalNodeIds = useMemo(() => new Set(finalNodes.map((n) => n.id)), [finalNodes]);
-  const finalEdges   = useMemo(
-    () => temporallyFilteredEdges.filter((e) => finalNodeIds.has(e.source) && finalNodeIds.has(e.target)),
-    [temporallyFilteredEdges, finalNodeIds],
-  );
+  const finalNodes = useMemo(() => focusIds ? timeNodes.filter(n => focusIds.has(n.id)) : timeNodes, [timeNodes, focusIds]);
+  const finalIds   = useMemo(() => new Set(finalNodes.map(n => n.id)), [finalNodes]);
+  const finalEdges = useMemo(() => timeEdges.filter(e => finalIds.has(e.source) && finalIds.has(e.target)), [timeEdges, finalIds]);
 
   useEffect(() => {
     if (!isPlaying) return;
-    const timer = window.setInterval(() => {
-      setPlaybackProgress((prev) => {
-        if (prev >= 100) { setIsPlaying(false); return 100; }
-        return Math.min(100, prev + 2);
-      });
+    const t = window.setInterval(() => {
+      setPlaybackProgress(p => { if (p >= 100) { setIsPlaying(false); return 100; } return Math.min(100, p + 2); });
     }, 240);
-    return () => window.clearInterval(timer);
+    return () => window.clearInterval(t);
   }, [isPlaying]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target   = event.target as HTMLElement | null;
-      const isTyping = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if (event.key === '/' && !isTyping) { event.preventDefault(); searchInputRef.current?.focus(); }
-      if (event.key === 'Escape') { setSelectedAgent(null); setHighlight([]); setFocusMode('all'); }
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      const typing = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable;
+      if (e.key === '/' && !typing) { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key === 'Escape') { setSelectedAgent(null); setHighlight([]); setFocusMode('all'); }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const resetAllFilters = () => {
-    setCommunityFilter(undefined);
-    setTrustFilter('all');
-    setFocusMode('all');
-    setPlaybackProgress(100);
-    setIsPlaying(false);
-    setHighlight([]);
-    setSelectedAgent(null);
-    setClearSearchSignal((v) => v + 1);
+  const reset = () => {
+    setCommunityFilter(undefined); setTrustFilter('all'); setFocusMode('all');
+    setPlaybackProgress(100); setIsPlaying(false); setHighlight([]); setSelectedAgent(null);
+    setClearSignal(v => v + 1);
   };
 
-  const hasActiveFilters = communityFilter !== undefined || trustFilter !== 'all' || focusMode !== 'all' || playbackProgress < 100;
+  const hasFilters = communityFilter !== undefined || trustFilter !== 'all' || focusMode !== 'all' || playbackProgress < 100;
 
-  const segBtn = (active: boolean) => ({
-    background:  active ? 'rgba(34,211,238,0.12)' : 'transparent',
-    border:      `1px solid ${active ? 'rgba(34,211,238,0.3)' : 'transparent'}`,
-    color:       active ? T.cyan : T.muted,
+  const segBtn = (active: boolean): React.CSSProperties => ({
+    fontSize: 13, fontWeight: 500, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
+    border: `1px solid ${active ? 'rgba(249,115,22,0.4)' : 'transparent'}`,
+    background: active ? 'rgba(249,115,22,0.12)' : 'transparent',
+    color: active ? T.orange : T.dim,
+    transition: 'all 0.12s',
   });
 
   return (
-    <div className="flex h-full min-h-0" style={{ background: T.bg }}>
+    <div style={{ display: 'flex', height: '100%', minHeight: 0, background: T.bg }} className="fade-in">
 
-      {/* ── Graph + toolbar ── */}
-      <div
-        className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
-        style={{ borderRight: `1px solid ${T.border}` }}
-      >
-        {/* Top bar */}
-        <div
-          className="px-6 py-4 shrink-0 space-y-4"
-          style={{ background: T.surface, borderBottom: `1px solid ${T.border}` }}
-        >
-          {/* Title row */}
-          <div className="flex flex-col gap-3 min-[520px]:flex-row min-[520px]:items-center min-[520px]:gap-4 min-w-0">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-base font-semibold text-white flex items-center gap-2.5">
-                <Network size={16} style={{ color: T.cyan }} />
+      {/* ── Canvas area ── */}
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', borderRight: `1px solid ${T.border}` }}>
+
+        {/* Header */}
+        <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+
+          {/* Row 1: title + search */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px 10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+              <Network size={15} style={{ color: T.orange, flexShrink: 0 }} />
+              <span style={{ fontSize: 15, fontWeight: 700, color: T.text, letterSpacing: '-0.01em' }}>
                 Investigation Graph
-              </h1>
-              <p className="text-xs mt-1 break-words" style={{ color: T.dim }}>
-                Hover a node to inspect · Click to open profile · Press{' '}
-                <kbd
-                  className="font-mono text-xs px-1.5 py-0.5 rounded"
-                  style={{ background: T.elevated, border: `1px solid ${T.border}`, color: T.muted }}
-                >
-                  /
-                </kbd>{' '}
-                to search
-              </p>
+              </span>
+              <span style={{ fontSize: 12, color: T.xdim, marginLeft: 4 }}>
+                · hover a node to inspect, click to focus, <kbd style={{ fontFamily: 'monospace', fontSize: 11, background: T.elevated, border: `1px solid ${T.border}`, borderRadius: 4, padding: '0 5px', color: T.dim }}>/</kbd> to search
+              </span>
             </div>
-            <div className="min-[520px]:ml-auto min-w-0 shrink-0 w-full min-[520px]:w-auto">
-              <SearchBar
-                onSelectAgent={(id) => { setSelectedAgent(id); setHighlight([id]); }}
-                inputRef={searchInputRef}
-                clearSignal={clearSearchSignal}
-              />
-            </div>
+            <SearchBar
+              onSelectAgent={id => { setSelectedAgent(id); setHighlight([id]); }}
+              inputRef={searchRef}
+              clearSignal={clearSignal}
+            />
           </div>
 
-          {/* Filter toolbar */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Community */}
+          {/* Row 2: filters */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 20px 12px', flexWrap: 'wrap' }}>
+
+            {/* Community dropdown */}
             <select
               value={communityFilter ?? ''}
-              onChange={(e) => setCommunityFilter(e.target.value ? Number(e.target.value) : undefined)}
-              className="text-sm rounded-xl px-3 py-2 focus:outline-none"
+              onChange={e => setCommunityFilter(e.target.value ? Number(e.target.value) : undefined)}
               style={{
-                background: T.elevated,
-                border:     `1px solid ${T.border}`,
-                color:      T.text,
+                fontSize: 13, padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
+                background: T.elevated, border: `1px solid ${T.border}`, color: T.muted,
               }}
             >
               <option value="">All communities</option>
-              {(communityData?.communities ?? []).map((c) => (
+              {(communityData?.communities ?? []).map(c => (
                 <option key={c.community_id} value={c.community_id}>
-                  Community #{c.community_id} ({c.member_count} agents)
+                  Community #{c.community_id} ({c.member_count})
                 </option>
               ))}
             </select>
 
-            {/* Trust filter pills */}
-            <div
-              className="flex items-center rounded-xl p-1 gap-1"
-              style={{ background: T.elevated, border: `1px solid ${T.border}` }}
-            >
-              {[
-                { id: 'all', label: 'All trust' },
-                { id: 'high',   label: '≥ 70' },
-                { id: 'medium', label: '40–69' },
-                { id: 'low',    label: '< 40' },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTrustFilter(t.id as typeof trustFilter)}
-                  className="text-sm rounded-lg px-3 py-1.5 font-medium transition-all"
-                  style={segBtn(trustFilter === t.id)}
-                >
-                  {t.label}
-                </button>
+            {/* Trust pills */}
+            <div style={{ display: 'flex', alignItems: 'center', background: T.elevated, border: `1px solid ${T.border}`, borderRadius: 9, padding: 3, gap: 2 }}>
+              {[{ id: 'all', l: 'All trust' }, { id: 'high', l: '≥ 70' }, { id: 'medium', l: '40–69' }, { id: 'low', l: '< 40' }].map(t => (
+                <button key={t.id} onClick={() => setTrustFilter(t.id as any)} style={segBtn(trustFilter === t.id)}>{t.l}</button>
               ))}
             </div>
 
-            {/* Ego focus pills */}
-            <div
-              className="flex items-center rounded-xl p-1 gap-1"
-              style={{ background: T.elevated, border: `1px solid ${T.border}` }}
-            >
-              {[
-                { id: 'all',  label: 'Full graph' },
-                { id: 'ego1', label: '1-hop' },
-                { id: 'ego2', label: '2-hop' },
-              ].map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setFocusMode(m.id as typeof focusMode)}
-                  disabled={!selectedAgent && m.id !== 'all'}
-                  className="text-sm rounded-lg px-3 py-1.5 font-medium transition-all disabled:opacity-30"
-                  style={segBtn(focusMode === m.id)}
-                >
-                  {m.label}
-                </button>
+            {/* Ego pills */}
+            <div style={{ display: 'flex', alignItems: 'center', background: T.elevated, border: `1px solid ${T.border}`, borderRadius: 9, padding: 3, gap: 2 }}>
+              {[{ id: 'all', l: 'Full graph' }, { id: 'ego1', l: '1-hop' }, { id: 'ego2', l: '2-hop' }].map(m => (
+                <button key={m.id} onClick={() => setFocusMode(m.id as any)} disabled={!selectedAgent && m.id !== 'all'} style={{ ...segBtn(focusMode === m.id), opacity: (!selectedAgent && m.id !== 'all') ? 0.3 : 1 }}>{m.l}</button>
               ))}
             </div>
 
             {/* Timeline */}
-            <div className="flex items-center gap-2.5 flex-1 min-w-48">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 160 }}>
               <button
-                onClick={() => { if (playbackProgress >= 100) setPlaybackProgress(0); setIsPlaying((v) => !v); }}
+                onClick={() => { if (playbackProgress >= 100) setPlaybackProgress(0); setIsPlaying(v => !v); }}
                 disabled={!temporalRange}
-                className="text-sm rounded-xl px-3.5 py-2 flex items-center gap-1.5 shrink-0 transition-all disabled:opacity-30"
-                style={{ background: T.elevated, border: `1px solid ${T.border}`, color: T.text }}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '6px 10px', borderRadius: 7, background: T.elevated, border: `1px solid ${T.border}`, color: T.muted, cursor: 'pointer', flexShrink: 0, opacity: !temporalRange ? 0.35 : 1 }}
               >
-                {isPlaying ? <Pause size={13} /> : <Play size={13} />}
+                {isPlaying ? <Pause size={12} /> : <Play size={12} />}
                 {isPlaying ? 'Pause' : 'Play'}
               </button>
-              <input
-                type="range" min={0} max={100} value={playbackProgress}
+              <input type="range" min={0} max={100} value={playbackProgress}
                 disabled={!temporalRange}
-                onChange={(e) => { setPlaybackProgress(Number(e.target.value)); setIsPlaying(false); }}
-                className="flex-1 disabled:opacity-30"
+                onChange={e => { setPlaybackProgress(Number(e.target.value)); setIsPlaying(false); }}
+                style={{ flex: 1 }}
               />
-              <span className="text-xs font-mono w-10 text-right shrink-0" style={{ color: T.dim }}>
+              <span style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: T.xdim, width: 32, textAlign: 'right', flexShrink: 0 }}>
                 {playbackProgress}%
               </span>
             </div>
 
-            {/* Reset */}
-            {hasActiveFilters && (
-              <button
-                onClick={resetAllFilters}
-                className="text-sm rounded-xl px-3.5 py-2 flex items-center gap-1.5 shrink-0 transition-all"
-                style={{ background: T.elevated, border: `1px solid ${T.border}`, color: T.muted }}
-              >
-                <X size={13} /> Reset
-              </button>
-            )}
-
-            {/* Agent count */}
-            <span className="text-sm font-mono ml-auto shrink-0" style={{ color: T.dim }}>
-              <span style={{ color: T.cyan }}>{finalNodes.length.toLocaleString()}</span>
+            {/* Count */}
+            <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: T.xdim, marginLeft: 'auto', flexShrink: 0 }}>
+              <span style={{ color: T.orange, fontWeight: 600 }}>{finalNodes.length.toLocaleString()}</span>
               {' / '}{nodes.length.toLocaleString()} agents
             </span>
+
+            {hasFilters && (
+              <button onClick={reset} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '6px 10px', borderRadius: 7, background: T.elevated, border: `1px solid ${T.border}`, color: T.dim, cursor: 'pointer', flexShrink: 0 }}>
+                <X size={11} /> Reset
+              </button>
+            )}
           </div>
 
-          {/* Active selection chips */}
+          {/* Active chips */}
           {(selectedAgent || highlight.length > 0) && (
-            <div className="flex flex-wrap gap-2 pt-1">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '0 20px 10px' }}>
               {selectedAgent && (
-                <span
-                  className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-full"
-                  style={{
-                    background: 'rgba(34,211,238,0.08)',
-                    border:     '1px solid rgba(34,211,238,0.25)',
-                    color:      T.cyan,
-                  }}
-                >
-                  Selected: <span className="font-mono font-semibold">{selectedAgentName}</span>
-                  <button
-                    onClick={() => { setSelectedAgent(null); setHighlight([]); }}
-                    className="ml-1 opacity-60 hover:opacity-100 transition-opacity"
-                  >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, padding: '4px 12px', borderRadius: 99, background: 'rgba(249,115,22,0.1)', border: '1px solid rgba(249,115,22,0.28)', color: T.orange }}>
+                  Selected: <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedName}</span>
+                  <button onClick={() => { setSelectedAgent(null); setHighlight([]); }} style={{ opacity: 0.6, cursor: 'pointer', color: 'inherit', background: 'none', border: 'none', display: 'flex', alignItems: 'center' }}>
                     <X size={11} />
                   </button>
                 </span>
               )}
               {highlight.length > 0 && (
-                <span
-                  className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-full"
-                  style={{
-                    background: 'rgba(244,63,94,0.08)',
-                    border:     '1px solid rgba(244,63,94,0.25)',
-                    color:      T.danger,
-                  }}
-                >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, padding: '4px 12px', borderRadius: 99, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.28)', color: T.red }}>
                   {highlight.length} highlighted
-                  <button
-                    onClick={() => setHighlight([])}
-                    className="ml-1 opacity-60 hover:opacity-100 transition-opacity"
-                  >
+                  <button onClick={() => setHighlight([])} style={{ opacity: 0.6, cursor: 'pointer', color: 'inherit', background: 'none', border: 'none', display: 'flex', alignItems: 'center' }}>
                     <X size={11} />
                   </button>
                 </span>
@@ -665,32 +571,26 @@ function GraphPage() {
         </div>
 
         {/* Canvas */}
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {loading ? (
-            <div className="flex items-center justify-center h-full gap-3" style={{ color: T.dim }}>
-              <Activity size={18} className="animate-pulse" style={{ color: T.cyan }} />
-              <span className="text-sm">Loading graph data…</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10, color: T.dim }}>
+              <Activity size={16} style={{ color: T.orange }} className="animate-pulse" />
+              <span style={{ fontSize: 14 }}>Loading graph data…</span>
             </div>
           ) : error ? (
-            <div className="flex h-full items-center justify-center px-8">
-              <div
-                className="rounded-xl p-8 max-w-md text-center space-y-4 min-w-0 mx-4"
-                style={{ background: 'rgba(244,63,94,0.06)', border: '1px solid rgba(244,63,94,0.25)' }}
-              >
-                <div className="text-base font-semibold" style={{ color: T.danger }}>
-                  Could not load graph data
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 40 }}>
+              <div style={{ ...card(), padding: 36, maxWidth: 380, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+                  <ServerOff size={22} style={{ color: T.red, opacity: 0.7 }} />
                 </div>
-                <div className="text-sm font-mono break-all" style={{ color: 'rgba(244,63,94,0.7)' }}>{error}</div>
-                <button
-                  onClick={() => reload()}
-                  className="text-sm rounded-xl px-5 py-2.5 transition-all"
-                  style={{
-                    background: 'rgba(244,63,94,0.12)',
-                    border:     '1px solid rgba(244,63,94,0.3)',
-                    color:      T.danger,
-                  }}
-                >
-                  Retry
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: T.muted }}>Graph unavailable</div>
+                  <div style={{ fontSize: 12, color: T.xdim, marginTop: 6, lineHeight: 1.5 }}>
+                    Could not connect to the API server. Make sure the backend is running on port 8000.
+                  </div>
+                </div>
+                <button onClick={reload} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontSize: 13, padding: '9px 16px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: T.red, cursor: 'pointer' }}>
+                  <RefreshCw size={13} /> Retry
                 </button>
               </div>
             </div>
@@ -699,76 +599,51 @@ function GraphPage() {
               nodes={finalNodes}
               edges={finalEdges}
               highlightAgents={highlight}
-              onNodeClick={(id) => { setSelectedAgent(id); setHighlight([id]); }}
-              emptyMessage="No agents match the current filters. Adjust or click Reset."
+              onNodeClick={id => { setSelectedAgent(id); setHighlight([id]); }}
+              emptyMessage="No agents match the current filters."
             />
           )}
         </div>
       </div>
 
       {/* ── Right sidebar ── */}
-      <aside
-        className="w-[26rem] shrink-0 flex flex-col min-h-0"
-        style={{ background: T.surface }}
-      >
+      <aside style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: T.surface }}>
+
         {/* Agent detail */}
-        <div className="flex-1 min-h-0 overflow-y-auto" style={{ borderBottom: `1px solid ${T.border}` }}>
-          <AgentDetail
-            agentId={selectedAgent}
-            onClose={() => { setSelectedAgent(null); setHighlight([]); }}
-          />
+        <div style={{ flex: '0 0 auto', maxHeight: '50%', minHeight: 0, overflowY: 'auto', borderBottom: `1px solid ${T.border}` }}>
+          <AgentDetail agentId={selectedAgent} onClose={() => { setSelectedAgent(null); setHighlight([]); }} />
         </div>
 
         {/* Workspace tabs */}
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          <div
-            className="flex items-center gap-1 px-4 py-3 shrink-0"
-            style={{ borderBottom: `1px solid ${T.border}` }}
-          >
-            {[
-              { id: 'threats', label: 'Threats' },
-              { id: 'paths',   label: 'Inject Paths' },
-              { id: 'case',    label: 'Case Notes' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setWorkspaceTab(tab.id as typeof workspaceTab)}
-                className="text-sm px-3.5 py-2 rounded-xl font-medium transition-all"
-                style={
-                  workspaceTab === tab.id
-                    ? { background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(34,211,238,0.25)', color: T.cyan }
-                    : { background: 'transparent', border: '1px solid transparent', color: T.dim }
-                }
-              >
-                {tab.label}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '10px 16px', borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+            {[{ id: 'threats', l: 'Threats' }, { id: 'paths', l: 'Inject Paths' }, { id: 'case', l: 'Case Notes' }].map(tab => (
+              <button key={tab.id} onClick={() => setWorkspaceTab(tab.id as any)} style={{
+                fontSize: 13, fontWeight: 500, padding: '6px 12px', borderRadius: 7, cursor: 'pointer',
+                background: workspaceTab === tab.id ? 'rgba(249,115,22,0.12)' : 'transparent',
+                border: `1px solid ${workspaceTab === tab.id ? 'rgba(249,115,22,0.35)' : 'transparent'}`,
+                color: workspaceTab === tab.id ? T.orange : T.dim,
+                transition: 'all 0.12s',
+              }}>
+                {tab.l}
               </button>
             ))}
           </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto p-5">
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 18 }}>
             {workspaceTab === 'threats' && (
-              <ThreatFeed
-                compact
-                onInvestigate={(ids) => { setHighlight(ids); if (ids.length > 0) setSelectedAgent(ids[0]); }}
-                onSelectAgent={(id) => { setSelectedAgent(id); setHighlight([id]); }}
-                selectedAgentId={selectedAgent}
-                highlightedAgentIds={highlight}
-              />
+              <ThreatFeed compact onInvestigate={ids => { setHighlight(ids); if (ids.length) setSelectedAgent(ids[0]); }}
+                onSelectAgent={id => { setSelectedAgent(id); setHighlight([id]); }}
+                selectedAgentId={selectedAgent} highlightedAgentIds={highlight} />
             )}
             {workspaceTab === 'paths' && (
-              <PathExplorer
-                selectedAgentId={selectedAgent}
-                onSelectAgent={(id) => { setSelectedAgent(id); setHighlight([id]); }}
-                onHighlightPath={(ids) => setHighlight(ids)}
-              />
+              <PathExplorer selectedAgentId={selectedAgent}
+                onSelectAgent={id => { setSelectedAgent(id); setHighlight([id]); }}
+                onHighlightPath={setHighlight} />
             )}
             {workspaceTab === 'case' && (
-              <CaseWorkspace
-                selectedAgentId={selectedAgent}
-                selectedAgentName={selectedAgentName}
+              <CaseWorkspace selectedAgentId={selectedAgent} selectedAgentName={selectedName}
                 highlightedAgentIds={highlight}
-                onSelectAgent={(id) => { setSelectedAgent(id); setHighlight([id]); }}
-              />
+                onSelectAgent={id => { setSelectedAgent(id); setHighlight([id]); }} />
             )}
           </div>
         </div>
@@ -779,83 +654,65 @@ function GraphPage() {
 
 // ─── Threats Page ─────────────────────────────────────────────────────────────
 function ThreatsPage() {
-  const { threats, anomalies, loading } = useThreats(30000);
+  const { threats, anomalies, loading } = useThreats(30_000);
   const [tab, setTab] = useState<'all' | 'campaigns' | 'anomalies'>('all');
 
-  const allThreats = [...threats, ...anomalies].sort((a, b) => {
-    const order = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
-    return (order[a.severity as keyof typeof order] ?? 2) - (order[b.severity as keyof typeof order] ?? 2);
+  const all = [...threats, ...anomalies].sort((a, b) => {
+    const ord = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+    return (ord[a.severity as keyof typeof ord] ?? 2) - (ord[b.severity as keyof typeof ord] ?? 2);
   });
 
-  const tabBtn = (active: boolean) => ({
-    background: active ? 'rgba(34,211,238,0.1)'  : T.card,
-    border:     active ? '1px solid rgba(34,211,238,0.28)' : `1px solid ${T.border}`,
-    color:      active ? T.cyan : T.muted,
+  const severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 } as Record<string, number>;
+  all.forEach(t => { if (t.severity in severityCounts) severityCounts[t.severity]++; });
+
+  const tabBtn = (active: boolean): React.CSSProperties => ({
+    fontSize: 13, fontWeight: 500, padding: '7px 14px', borderRadius: 8, cursor: 'pointer',
+    background: active ? 'rgba(249,115,22,0.12)' : T.card,
+    border: `1px solid ${active ? 'rgba(249,115,22,0.35)' : T.border}`,
+    color: active ? T.orange : T.dim,
+    transition: 'all 0.12s',
   });
 
   return (
-    <div className="flex h-full min-h-0" style={{ background: T.bg }}>
+    <div style={{ display: 'flex', height: '100%', minHeight: 0, background: T.bg }} className="fade-in">
 
-      {/* Main */}
-      <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden gap-0">
-        {/* Page header */}
-        <div
-          className="px-5 sm:px-6 lg:px-8 py-5 sm:py-6 shrink-0 min-w-0"
-          style={{ background: T.surface, borderBottom: `1px solid ${T.border}` }}
-        >
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6 min-w-0">
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-                <ShieldAlert size={22} style={{ color: T.danger }} />
-                Threat Intelligence
-              </h1>
-              <p className="text-sm mt-2 leading-relaxed max-w-xl break-words" style={{ color: T.muted }}>
-                Coordinated campaigns and temporal anomalies, ranked by severity.
-                Click <strong className="text-white">Show in graph</strong> to highlight suspects.
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2 items-start shrink-0 lg:justify-end">
-              {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const).map((sev) => {
-                const count = allThreats.filter((t) => t.severity === sev).length;
-                if (!count) return null;
-                return (
-                  <span key={sev} className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${SEVERITY_BG[sev]}`}>
-                    {count} {sev}
-                  </span>
-                );
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <PageHeader
+          icon={ShieldAlert}
+          title="Threat Intelligence"
+          subtitle="Coordinated campaigns and temporal anomalies, ranked by severity"
+          accent={T.red}
+          right={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const).map(sev => {
+                const cnt = severityCounts[sev];
+                if (!cnt) return null;
+                return <span key={sev} className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${SEVERITY_BG[sev]}`}>{cnt} {sev}</span>;
               })}
-              {allThreats.length === 0 && !loading && (
-                <span className="text-sm" style={{ color: T.dim }}>No active threats</span>
-              )}
             </div>
-          </div>
+          }
+        />
 
-          {/* Tabs */}
-          <div className="flex items-center gap-2 mt-5">
-            {[
-              { id: 'all',       label: 'All',       count: allThreats.length  },
-              { id: 'campaigns', label: 'Campaigns', count: threats.length     },
-              { id: 'anomalies', label: 'Anomalies', count: anomalies.length   },
-            ].map(({ id, label, count }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id as typeof tab)}
-                className="text-sm font-medium px-4 py-2 rounded-xl transition-all"
-                style={tabBtn(tab === id)}
-              >
-                {label}
-                <span className="ml-2 text-xs font-mono opacity-60">{count}</span>
-              </button>
-            ))}
-          </div>
+        {/* Tabs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 32px', background: T.surface, borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+          {[
+            { id: 'all',       l: 'All',       cnt: all.length },
+            { id: 'campaigns', l: 'Campaigns', cnt: threats.length },
+            { id: 'anomalies', l: 'Anomalies', cnt: anomalies.length },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id as any)} style={tabBtn(tab === t.id)}>
+              {t.l}
+              <span style={{ marginLeft: 6, fontSize: 11, fontVariantNumeric: 'tabular-nums', opacity: 0.55 }}>{t.cnt}</span>
+            </button>
+          ))}
         </div>
 
         {/* Feed */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 lg:px-8 py-5">
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 32px' }}>
           {loading ? (
-            <div className="flex items-center justify-center h-32 gap-3" style={{ color: T.dim }}>
-              <Activity size={16} className="animate-pulse" style={{ color: T.cyan }} />
-              <span className="text-sm">Loading threats…</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 120, gap: 10, color: T.dim }}>
+              <Activity size={15} style={{ color: T.orange }} className="animate-pulse" />
+              <span style={{ fontSize: 14 }}>Loading threats…</span>
             </div>
           ) : (
             <ThreatFeed />
@@ -864,19 +721,11 @@ function ThreatsPage() {
       </div>
 
       {/* Metrics sidebar */}
-      <aside
-        className="w-80 xl:w-96 shrink-0 flex flex-col overflow-hidden"
-        style={{ background: T.surface, borderLeft: `1px solid ${T.border}` }}
-      >
-        <div
-          className="px-5 py-4 shrink-0"
-          style={{ borderBottom: `1px solid ${T.border}` }}
-        >
-          <div className={sectionHeader} style={{ color: T.cyan }}>
-            <BarChart3 size={13} /> Network Metrics
-          </div>
+      <aside style={{ width: 320, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: T.surface, borderLeft: `1px solid ${T.border}` }}>
+        <div style={{ padding: '18px 20px', borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+          <div><SectionLabel icon={BarChart3} color={T.cyan}>Network Metrics</SectionLabel></div>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           <MetricsPanel />
         </div>
       </aside>
@@ -886,140 +735,105 @@ function ThreatsPage() {
 
 // ─── Agents Page ──────────────────────────────────────────────────────────────
 function AgentsPage() {
-  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const { nodes } = useGraphData();
-  const topAgents = [...nodes].sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0)).slice(0, 25);
+  const top = [...nodes].sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0)).slice(0, 25);
 
   return (
-    <div className="flex h-full min-h-0" style={{ background: T.bg }}>
-
-      {/* Main */}
-      <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div
-          className="px-5 sm:px-6 lg:px-8 py-5 sm:py-6 shrink-0 min-w-0"
-          style={{ background: T.surface, borderBottom: `1px solid ${T.border}` }}
-        >
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between md:gap-6 min-w-0">
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-                <Users size={22} style={{ color: T.cyan }} />
-                Agent Explorer
-              </h1>
-              <p className="text-sm mt-2 leading-relaxed break-words" style={{ color: T.muted }}>
-                Top 25 agents by influence rank. Click a row to inspect trust, heartbeat, and timeline.
-              </p>
-            </div>
-            <div className="shrink-0 w-full md:w-auto min-w-0">
-              <SearchBar onSelectAgent={setSelectedAgent} />
-            </div>
-          </div>
-        </div>
+    <div style={{ display: 'flex', height: '100%', minHeight: 0, background: T.bg }} className="fade-in">
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <PageHeader
+          icon={Users}
+          title="Agent Explorer"
+          subtitle="Top 25 agents by influence rank — click a row for full profile"
+          accent={T.blue}
+          right={<SearchBar onSelectAgent={setSelected} />}
+        />
 
         {/* Table */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 lg:px-8 py-5">
-          <div
-            className="rounded-xl overflow-hidden min-w-0"
-            style={{ border: `1px solid ${T.border}` }}
-          >
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 32px' }}>
+          <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, overflow: 'hidden' }}>
+
             {/* Header row */}
-            <div
-              className="grid px-6 py-3.5"
-              style={{
-                gridTemplateColumns: '2.5rem 1fr 7rem 7rem 8rem 6rem',
-                background: T.elevated,
-                borderBottom: `1px solid ${T.border}`,
-              }}
-            >
-              {['#', 'Agent', 'PageRank', 'Degree', 'Trust', 'Community'].map((h) => (
-                <span
-                  key={h}
-                  className="text-xs font-bold uppercase tracking-wider"
-                  style={{ color: T.dim }}
-                >
-                  {h}
-                </span>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '44px 1fr 100px 100px 130px 90px',
+              padding: '10px 20px',
+              background: T.elevated,
+              borderBottom: `1px solid ${T.border}`,
+            }}>
+              {['#', 'Agent', 'PageRank', 'Degree', 'Trust', 'Community'].map(h => (
+                <span key={h} style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: T.xdim }}>{h}</span>
               ))}
             </div>
 
-            {/* Rows */}
-            {topAgents.map((agent, i) => {
-              const cColor   = communityColor(agent.community_id);
-              const tColor   = trustColor(agent.trust_score);
-              const isSelected = selectedAgent === agent.id;
-              return (
-                <button
-                  key={agent.id}
-                  onClick={() => setSelectedAgent(isSelected ? null : agent.id)}
-                  className="w-full grid px-6 py-4 transition-all text-left"
-                  style={{
-                    gridTemplateColumns: '2.5rem 1fr 7rem 7rem 8rem 6rem',
-                    background: isSelected ? 'rgba(34,211,238,0.06)' : 'transparent',
-                    boxShadow: isSelected ? `inset 3px 0 0 0 ${T.cyan}` : 'none',
-                    borderBottom: `1px solid ${T.borderDim}`,
-                  }}
-                  onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = T.elevated; }}
-                  onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                >
-                  <span className="text-sm font-mono self-center" style={{ color: T.dim }}>{i + 1}</span>
+            {top.length === 0 ? (
+              <EmptyState icon={Users} title="No agents loaded" message="Start the API server to load agent data" color={T.dim} />
+            ) : (
+              top.map((agent, i) => {
+                const cc  = communityColor(agent.community_id);
+                const tc  = trustColor(agent.trust_score);
+                const sel = selected === agent.id;
+                return (
+                  <button
+                    key={agent.id}
+                    onClick={() => setSelected(sel ? null : agent.id)}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '44px 1fr 100px 100px 130px 90px',
+                      padding: '12px 20px', width: '100%', textAlign: 'left',
+                      background: sel ? 'rgba(249,115,22,0.07)' : 'transparent',
+                      borderBottom: `1px solid ${T.border}`,
+                      borderLeft: `3px solid ${sel ? T.orange : 'transparent'}`,
+                      cursor: 'pointer', transition: 'all 0.1s',
+                    }}
+                    onMouseEnter={e => { if (!sel) e.currentTarget.style.background = T.elevated; }}
+                    onMouseLeave={e => { if (!sel) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', color: T.xdim, alignSelf: 'center' }}>{i + 1}</span>
 
-                  <div className="flex items-center gap-2.5 min-w-0 self-center">
-                    <div
-                      className="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center text-xs font-bold"
-                      style={{ background: `${cColor}18`, color: cColor, border: `1px solid ${cColor}30` }}
-                    >
-                      {agent.name?.[0]?.toUpperCase() ?? '?'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, alignSelf: 'center' }}>
+                      <div style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, background: `${cc}18`, color: cc, border: `1px solid ${cc}30` }}>
+                        {agent.name?.[0]?.toUpperCase() ?? '?'}
+                      </div>
+                      <span style={{ fontSize: 13, fontFamily: 'monospace', color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {agent.name}
+                      </span>
                     </div>
-                    <span className="text-sm font-mono text-white truncate">{agent.name}</span>
-                  </div>
 
-                  <span className="text-sm font-mono self-center font-semibold" style={{ color: T.cyan }}>
-                    {agent.pagerank?.toFixed(3) ?? '—'}
-                  </span>
+                    <span style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 700, color: T.cyan, alignSelf: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                      {agent.pagerank?.toFixed(3) ?? '—'}
+                    </span>
 
-                  <span className="text-sm font-mono self-center" style={{ color: T.muted }}>
-                    ↓{agent.in_degree ?? 0} ↑{agent.out_degree ?? 0}
-                  </span>
+                    <span style={{ fontSize: 12, fontFamily: 'monospace', color: T.muted, alignSelf: 'center' }}>
+                      ↓{agent.in_degree ?? 0} ↑{agent.out_degree ?? 0}
+                    </span>
 
-                  <div className="flex items-center gap-2.5 self-center">
-                    <div
-                      className="w-14 h-1.5 rounded-full overflow-hidden shrink-0"
-                      style={{ background: T.elevated }}
-                    >
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: `${agent.trust_score ?? 0}%`, background: tColor }}
-                      />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'center' }}>
+                      <div style={{ width: 56, height: 5, borderRadius: 99, background: T.elevated, overflow: 'hidden', flexShrink: 0 }}>
+                        <div style={{ height: '100%', width: `${agent.trust_score ?? 0}%`, background: tc, borderRadius: 99 }} />
+                      </div>
+                      <span style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: tc, fontVariantNumeric: 'tabular-nums' }}>
+                        {agent.trust_score !== undefined ? Math.round(agent.trust_score) : '—'}
+                      </span>
                     </div>
-                    <span className="text-sm font-mono font-bold" style={{ color: tColor }}>
-                      {agent.trust_score !== undefined ? Math.round(agent.trust_score) : '—'}
-                    </span>
-                  </div>
 
-                  <div className="flex items-center gap-2 self-center">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ background: cColor }}
-                    />
-                    <span className="text-sm font-mono" style={{ color: T.muted }}>
-                      #{agent.community_id ?? '?'}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, alignSelf: 'center' }}>
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: cc, flexShrink: 0, display: 'inline-block' }} />
+                      <span style={{ fontSize: 12, fontFamily: 'monospace', color: T.dim }}>#{agent.community_id ?? '?'}</span>
+                    </div>
+                  </button>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
 
       {/* Detail panel */}
-      {selectedAgent && (
-        <aside
-          className="w-96 shrink-0 flex flex-col overflow-hidden"
-          style={{ background: T.surface, borderLeft: `1px solid ${T.border}` }}
-        >
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <AgentDetail agentId={selectedAgent} onClose={() => setSelectedAgent(null)} />
+      {selected && (
+        <aside style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: T.surface, borderLeft: `1px solid ${T.border}` }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            <AgentDetail agentId={selected} onClose={() => setSelected(null)} />
           </div>
         </aside>
       )}
@@ -1032,206 +846,124 @@ function CommunitiesPage() {
   const { data: communityData } = useCommunities();
   const { nodes } = useGraphData();
   const { data: overview } = useNetworkOverview();
+  const ov = overview as any;
 
   const communities  = (communityData?.communities ?? []) as any[];
   const echoChambers = (communityData?.echo_chambers ?? []) as any[];
   const echoIds      = new Set(echoChambers.map((e: any) => e.community_id));
 
+  const modScore = ov?.modularity ?? 0;
+  const modLabel = modScore > 0.9 ? '⚠ Echo chamber risk' : modScore > 0.6 ? '⚡ Strong structure' : '✓ Moderate';
+  const modColor = modScore > 0.9 ? T.amber : modScore > 0.6 ? T.green : T.muted;
+
   return (
-    <div className="h-full min-h-0 overflow-y-auto min-w-0" style={{ background: T.bg }}>
-      <div className="max-w-7xl mx-auto px-5 sm:px-6 lg:px-8 py-5 sm:py-6 space-y-5">
-
-        {/* Header */}
-        <div
-          className="rounded-xl p-6 sm:p-7 relative isolate min-w-0"
-          style={{ background: T.card, border: `1px solid ${T.border}` }}
-        >
-          <div
-            className="absolute inset-0 rounded-[inherit] overflow-hidden pointer-events-none"
-            aria-hidden
-          >
-            <div
-              className="absolute top-0 right-0 w-72 h-72"
-              style={{ background: 'radial-gradient(circle at top right, rgba(167,139,250,0.06), transparent 60%)' }}
-            />
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: T.bg }} className="fade-in">
+      <PageHeader
+        icon={GitBranch}
+        title="Community Analysis"
+        subtitle="Louvain-detected clusters — high isolation ratios indicate echo chambers"
+        accent={T.purple}
+        right={ov && (
+          <div style={{ textAlign: 'center', background: 'rgba(167,139,250,0.09)', border: '1px solid rgba(167,139,250,0.22)', borderRadius: 10, padding: '10px 20px' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: T.text }}>{modScore.toFixed(3)}</div>
+            <div style={{ fontSize: 11, color: T.xdim, marginTop: 2 }}>Modularity Q</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: modColor, marginTop: 3 }}>{modLabel}</div>
           </div>
-          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between min-w-0">
-            <div className="min-w-0 flex-1">
-              <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-                <GitBranch size={22} style={{ color: T.purple }} />
-                Community Analysis
-              </h1>
-              <p className="text-sm mt-2 leading-relaxed max-w-2xl break-words" style={{ color: T.muted }}>
-                Louvain-detected clusters in the agent social graph. High isolation ratios and fast
-                formation speed are indicators of echo chambers or coordinated inauthentic communities.
-              </p>
-            </div>
-            {overview && (
-              <div
-                className="rounded-xl px-6 py-5 text-center shrink-0 w-full sm:w-auto"
-                style={{
-                  background: 'rgba(167,139,250,0.07)',
-                  border:     '1px solid rgba(167,139,250,0.25)',
-                }}
-              >
-                <div className="text-3xl font-bold font-mono text-white">
-                  {(overview as any).modularity?.toFixed(3)}
-                </div>
-                <div className="text-xs mt-1.5" style={{ color: T.dim }}>Modularity Q</div>
-                <div
-                  className="text-xs mt-1 font-semibold"
-                  style={{
-                    color: ((overview as any).modularity ?? 0) > 0.9
-                      ? T.warning
-                      : ((overview as any).modularity ?? 0) > 0.6
-                        ? T.success
-                        : T.muted,
-                  }}
-                >
-                  {((overview as any).modularity ?? 0) > 0.9
-                    ? '⚠ Echo chamber risk'
-                    : ((overview as any).modularity ?? 0) > 0.6
-                      ? '⚡ Strong structure'
-                      : '✓ Moderate'}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        )}
+      />
 
-        {/* Echo chamber warning */}
+      <div style={{ padding: '28px 32px', display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1440 }}>
+
+        {/* Echo chamber alert */}
         {echoChambers.length > 0 && (
-          <div
-            className="rounded-xl p-5 flex items-start gap-4"
-            style={{ background: 'rgba(244,63,94,0.06)', border: '1px solid rgba(244,63,94,0.25)' }}
-          >
-            <AlertTriangle size={18} style={{ color: T.danger }} className="shrink-0 mt-0.5" />
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '16px 20px', borderRadius: 10, background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.22)' }}>
+            <AlertTriangle size={16} style={{ color: T.red, flexShrink: 0, marginTop: 1 }} />
             <div>
-              <div className="text-sm font-semibold" style={{ color: T.danger }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: T.red }}>
                 {echoChambers.length} echo chamber{echoChambers.length > 1 ? 's' : ''} detected
               </div>
-              <p className="text-sm mt-1.5 leading-relaxed" style={{ color: 'rgba(244,63,94,0.7)' }}>
-                These communities have extreme internal density with minimal external connections —
-                a strong indicator of coordinated amplification or ideological isolation.
+              <p style={{ fontSize: 12, color: 'rgba(239,68,68,0.7)', marginTop: 4, lineHeight: 1.5 }}>
+                These communities show extreme internal density with minimal external connections — a strong indicator of coordinated amplification or ideological isolation.
               </p>
             </div>
           </div>
         )}
 
-        {/* Community cards grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 min-w-0">
-          {communities.length === 0 ? (
-            <div className="col-span-full py-16 text-center" style={{ color: T.dim }}>
-              <div className="text-sm">No community data.</div>
-              <div className="text-xs mt-2">
-                Run{' '}
-                <code
-                  className="font-mono px-1.5 py-0.5 rounded"
-                  style={{ background: T.elevated, border: `1px solid ${T.border}`, color: T.cyan }}
-                >
-                  scripts/run_analysis.py
-                </code>{' '}
-                first.
-              </div>
-            </div>
-          ) : (
-            communities.map((c: any) => {
-              const cColor    = communityColor(c.community_id);
-              const isEcho    = echoIds.has(c.community_id);
-              const totalEdges = (c.internal_edges ?? 0) + (c.external_edges ?? 0);
-              const isolation = totalEdges > 0 ? (c.internal_edges ?? 0) / totalEdges : 0;
-              const topAgts   = nodes
-                .filter((n) => n.community_id === c.community_id)
+        {/* Community grid */}
+        {communities.length === 0 ? (
+          <EmptyState icon={GitBranch} title="No community data" message="The API server needs to be running and analysis must be executed first." color={T.purple} />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+            {communities.map((c: any) => {
+              const cc = communityColor(c.community_id);
+              const isEcho = echoIds.has(c.community_id);
+              const total = (c.internal_edges ?? 0) + (c.external_edges ?? 0);
+              const iso   = total > 0 ? (c.internal_edges ?? 0) / total : 0;
+              const isoColor = iso > 0.85 ? T.red : iso > 0.6 ? T.amber : cc;
+              const topAgts = nodes
+                .filter(n => n.community_id === c.community_id)
                 .sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0))
                 .slice(0, 3);
-              const isoColor  = isolation > 0.85 ? T.danger : isolation > 0.6 ? T.warning : cColor;
 
               return (
-                <div
-                  key={c.community_id}
-                  className="rounded-xl overflow-hidden min-w-0"
-                  style={{
-                    background: T.card,
-                    border:     `1px solid ${T.border}`,
-                  }}
-                >
-                  <div className="h-1 w-full shrink-0" style={{ background: cColor }} aria-hidden />
+                <div key={c.community_id} style={{ ...card(), overflow: 'hidden' }}>
+                  {/* Color top bar */}
+                  <div style={{ height: 3, background: cc }} />
+
                   {/* Card header */}
-                  <div className="px-5 py-4 flex items-center justify-between gap-2 min-w-0" style={{ borderBottom: `1px solid ${T.border}` }}>
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold"
-                        style={{ background: `${cColor}18`, color: cColor }}
-                      >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '14px 18px', borderBottom: `1px solid ${T.border}` }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, background: `${cc}18`, color: cc }}>
                         #{c.community_id}
                       </div>
-                      <span className="text-sm font-semibold text-white">Community {c.community_id}</span>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Community {c.community_id}</span>
                     </div>
                     {isEcho && (
-                      <span
-                        className="text-xs font-semibold px-2.5 py-1 rounded-lg"
-                        style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.25)', color: T.danger }}
-                      >
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 6, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.28)', color: T.red }}>
                         ⚠ Echo
                       </span>
                     )}
                   </div>
 
-                  <div className="p-5 space-y-5">
-                    {/* Stats row */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div
-                        className="rounded-xl p-4"
-                        style={{ background: T.elevated, border: `1px solid ${T.border}` }}
-                      >
-                        <div className="text-2xl font-bold font-mono text-white">{c.member_count}</div>
-                        <div className="text-xs mt-1" style={{ color: T.dim }}>members</div>
+                  <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {/* Stats */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div style={{ background: T.elevated, borderRadius: 8, padding: '12px 14px' }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: T.text }}>{c.member_count}</div>
+                        <div style={{ fontSize: 11, color: T.xdim, marginTop: 2 }}>members</div>
                       </div>
-                      <div
-                        className="rounded-xl p-4"
-                        style={{ background: T.elevated, border: `1px solid ${T.border}` }}
-                      >
-                        <div className="text-2xl font-bold font-mono" style={{ color: isoColor }}>
-                          {Math.round(isolation * 100)}%
-                        </div>
-                        <div className="text-xs mt-1" style={{ color: T.dim }}>isolation</div>
+                      <div style={{ background: T.elevated, borderRadius: 8, padding: '12px 14px' }}>
+                        <div style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: isoColor }}>{Math.round(iso * 100)}%</div>
+                        <div style={{ fontSize: 11, color: T.xdim, marginTop: 2 }}>isolation</div>
                       </div>
                     </div>
 
                     {/* Isolation bar */}
                     <div>
-                      <div className="flex justify-between text-xs mb-2" style={{ color: T.dim }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: T.xdim, marginBottom: 6 }}>
                         <span>Internal connectivity</span>
                         <span>{c.internal_edges ?? '?'} int / {c.external_edges ?? '?'} ext</span>
                       </div>
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: T.elevated }}>
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${isolation * 100}%`, background: isoColor }}
-                        />
+                      <div style={{ height: 5, borderRadius: 99, background: T.elevated, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${iso * 100}%`, background: isoColor, borderRadius: 99 }} />
                       </div>
                     </div>
 
                     {/* Top agents */}
                     {topAgts.length > 0 && (
                       <div>
-                        <div
-                          className="text-xs font-bold uppercase tracking-wider mb-3"
-                          style={{ color: T.dim }}
-                        >
+                        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: T.xdim, marginBottom: 8 }}>
                           Top influencers
                         </div>
-                        <div className="space-y-2">
-                          {topAgts.map((a) => (
-                            <div key={a.id} className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <ArrowRight size={11} style={{ color: cColor }} className="shrink-0" />
-                                <span className="text-sm font-mono truncate" style={{ color: T.text }}>
-                                  {a.name}
-                                </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {topAgts.map(a => (
+                            <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                <span style={{ width: 5, height: 5, borderRadius: '50%', background: cc, flexShrink: 0, display: 'inline-block' }} />
+                                <span style={{ fontSize: 13, fontFamily: 'monospace', color: T.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
                               </div>
-                              <span className="text-xs font-mono shrink-0" style={{ color: T.dim }}>
-                                PR {a.pagerank?.toFixed(2)}
+                              <span style={{ fontSize: 11, fontFamily: 'monospace', color: T.xdim, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                                {a.pagerank?.toFixed(2)}
                               </span>
                             </div>
                           ))}
@@ -1241,22 +973,19 @@ function CommunitiesPage() {
                   </div>
                 </div>
               );
-            })
-          )}
-        </div>
-
-        {/* Full metrics panel */}
-        <div className="rounded-xl overflow-hidden min-h-0 min-w-0" style={cardStyle}>
-          <div className="px-6 py-4" style={{ borderBottom: `1px solid ${T.border}` }}>
-            <div className={sectionHeader} style={{ color: T.cyan }}>
-              <BarChart3 size={13} /> Distribution Metrics
-            </div>
+            })}
           </div>
-          <div style={{ minHeight: 380 }}>
+        )}
+
+        {/* Distribution Metrics */}
+        <div style={{ ...card(), overflow: 'hidden' }}>
+          <div style={{ padding: '16px 24px', borderBottom: `1px solid ${T.border}` }}>
+            <div><SectionLabel icon={BarChart3} color={T.cyan}>Distribution Metrics</SectionLabel></div>
+          </div>
+          <div style={{ minHeight: 360 }}>
             <MetricsPanel />
           </div>
         </div>
-
       </div>
     </div>
   );

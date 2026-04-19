@@ -72,7 +72,7 @@ export function pageRankSize(pagerank: number | undefined, min = 4, max = 20): n
 
 /** Dim a hex color for non-focused nodes (deep navy so they nearly vanish). */
 export function dimHex(_hex: string): string {
-  return '#0e1827';
+  return '#1e1e24';
 }
 
 /** PageRank heatmap: low = blue, mid = cyan, high = rose. */

@@ -6,16 +6,18 @@ import { COMMUNITY_PALETTE } from '../lib/colors';
 import { TrendingUp, Users, Layers, GitBranch } from 'lucide-react';
 
 const T = {
-  card:     '#0e1625',
-  elevated: '#132030',
-  border:   '#1c2e44',
-  text:     '#dde4f0',
-  muted:    '#8090a8',
-  dim:      '#3d5068',
+  card:     '#1a1a1f',
+  elevated: '#222228',
+  border:   'rgba(255,255,255,0.07)',
+  text:     '#f2f2f5',
+  muted:    '#9b9baa',
+  dim:      '#6b6b7a',
+  xdim:     '#46464f',
+  orange:   '#f97316',
   cyan:     '#22d3ee',
-  danger:   '#f43f5e',
-  warning:  '#fbbf24',
-  success:  '#34d399',
+  danger:   '#ef4444',
+  warning:  '#f59e0b',
+  success:  '#22c55e',
 };
 
 interface GiniBarProps {
@@ -83,7 +85,7 @@ export function MetricsPanel() {
     fontWeight:   700,
     textTransform: 'uppercase' as const,
     letterSpacing: '0.1em',
-    color:        T.cyan,
+    color:        T.orange,
     marginBottom: 12,
   };
 
@@ -108,8 +110,8 @@ export function MetricsPanel() {
                 className="rounded-xl p-3.5"
                 style={{ background: T.elevated, border: `1px solid ${T.border}` }}
               >
-                <div className="text-lg font-bold font-mono text-white">{item.value ?? '—'}</div>
-                <div className="text-xs mt-0.5" style={{ color: T.dim }}>{item.label}</div>
+                <div className="text-lg font-bold font-mono" style={{ color: T.text }}>{item.value ?? '—'}</div>
+                <div className="text-xs mt-0.5" style={{ color: T.xdim }}>{item.label}</div>
               </div>
             ))}
           </div>
